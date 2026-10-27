@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# A stand-in for osascript, for this samples folder's hand run ONLY: put first on PATH,
+# it answers library_audit's three read-only scripts from an invented Music library,
+# so the sample never reaches the real Music.app. Its tracks point into this samples
+# folder, found from this file's own location. Any other script is refused, exit 1.
+set -euo pipefail
+
+samples="$(cd "$(dirname "$0")/.." && pwd -P)"
+quartet="$samples/library/The Invented Quartet/Placeholder Album"
+trio="$samples/library/The Made-Up Trio/Lone Placeholder"
+duo="$samples/library/The Split-Level Duo/Split Placeholder Album"
+# The duo's name with a typographic hyphen, U+2010, written as its UTF-8 bytes: the
+# album its files split between the two spellings.
+duo_typographic="The Split$(printf '\342\200\220')Level Duo"
+
+# One listing row: persistent ID, cloud status, disc, track, path, album, artist, the
+# compilation flag (false for every track here), the track's class (a file track unless
+# an eighth argument names another), the enabled flag (true unless a ninth argument
+# says false) and Music.app's size in bytes (0, none, unless a tenth names one).
+row() {
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tfalse\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" \
+        "$6" "$7" "${8:-file track}" "${9:-true}" "${10:-0}"
+}
+
+# The whole invented library in one reply: nine tracks fit in one batch.
+rows() {
+    # Music.app's size for this zero-byte file is stale: a size finding.
+    row 00000000000000A1 'local only' 1 1 "$quartet/01 First Placeholder.mp3" \
+        'Placeholder Album' 'The Invented Quartet' 'file track' true 4096
+    row 00000000000000A2 'local only' 1 2 "$quartet/02 Second Placeholder.mp3" \
+        'Placeholder Album' 'The Invented Quartet'
+    row 00000000000000A4 'local only' 1 4 "$quartet/04 Fourth Placeholder.mp3" \
+        'Placeholder Album' 'The Invented Quartet'
+    row 00000000000000B1 'local only' 1 1 "$trio/01 Lone Placeholder.m4a" \
+        'Lone Placeholder' 'The Made-Up Trio'
+    row 00000000000000C1 matched 1 1 '' 'Cloud Placeholder' 'The Invented Quartet' \
+        'shared track'
+    row 00000000000000D1 'local only' 1 1 "$samples/outside/01 Outside Placeholder.mp3" \
+        'Outside Placeholder' 'The Made-Up Trio'
+    row 00000000000000E1 'local only' 1 1 "$duo/01 Split Placeholder.mp3" \
+        'Split Placeholder Album' "$duo_typographic"
+    # Unchecked in Music.app: an unchecked-track finding.
+    row 00000000000000E2 'local only' 1 2 "$duo/02 Split Placeholder.mp3" \
+        'Split Placeholder Album' 'The Split-Level Duo' 'file track' false
+    row 00000000000000E3 'local only' 1 3 "$duo/03 Split Placeholder.mp3" \
+        'Split Placeholder Album' "$duo_typographic"
+    # osascript ends its output with one linefeed of its own.
+    printf '\n'
+}
+
+case "${2:-}" in
+    'application "Music" is running') printf 'true\n' ;;
+    *'return count of tracks of library playlist 1'*) printf '9\n' ;;
+    *'persistent ID of tracks'*) rows ;;
+    *)
+        printf 'fake osascript: not a script this sample answers\n' >&2
+        exit 1
+        ;;
+esac

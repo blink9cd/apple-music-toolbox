@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# A stand-in for afcclient, for this samples folder's hand run ONLY: put first on PATH,
+# it answers phone_audit's read-only calls from an invented phone described in
+# ../phone/, so the sample never reaches a real iPhone. It mirrors afcclient 1.4.0's
+# output: `ls -l` lines in its printf layout, a failed command's one `Error:` line on
+# stdout with exit 0, and a `get` that copies nothing over an existing file. Paths are
+# relative to the AFC root (the device's /var/mobile/Media), and only those exact paths
+# are served: anything else is a missing object. The music database is built from
+# ../phone/MediaLibrary.sql at each copy, with sqlite3; its -wal and -shm files are
+# absent. Any other command or flag is refused, exit 1.
+#
+# On request, for a hand check of how the tool takes them:
+#   FAKE_AFCCLIENT_DISCONNECT=1     every device command prints afcclient's
+#                                   unplugged line instead, exit 0
+#   FAKE_AFCCLIENT_STAT_FAIL=NAME   NAME's listing line is printed zeroed, as afcclient
+#                                   prints one whose stat failed
+set -euo pipefail
+
+phone="$(cd "$(dirname "$0")/../phone" && pwd -P)"
+database=/iTunes_Control/iTunes/MediaLibrary.sqlitedb
+music=/iTunes_Control/Music
+# Every entry's modification time: phone_audit never reads it.
+stamp='26 Oct 2026 13:01:02'
+
+refuse() {
+    printf 'fake afcclient: not a command this sample serves: %s\n' "$*" >&2
+    exit 1
+}
+
+# One `ls -l` line: the mode, the size in bytes, the name. A name asked to fail its
+# stat gets the zeroed line instead: link count 0, size 0, the epoch.
+entry() {
+    if [ "$3" = "${FAKE_AFCCLIENT_STAT_FAIL:-}" ]; then
+        printf '%s %4d mobile mobile %10d %s %s\n' -rw-r--r-- 0 0 '01 Jan 1970 00:00:00' "$3"
+        return
+    fi
+    printf '%s %4d mobile mobile %10d %s %s\n' "$1" 1 "$2" "$stamp" "$3"
+}
+
+# The sync folders the invented phone has, one per line.
+folders() {
+    cut -f1 "$phone/files.tsv" | sort -u
+}
+
+# `ls -l PATH`: the sync folders of the music folder, or one folder's files.
+list() {
+    if [ "$1" = "$music" ]; then
+        folders | while read -r folder; do entry drwxr-xr-x 0 "$folder"; done
+        return
+    fi
+    folder="${1#"$music"/}"
+    if [ "$1" != "$music/$folder" ] || ! folders | grep -qx -- "$folder"; then
+        printf "Error: Failed to list '%s': Not found (8)\n" "$1"
+        return
+    fi
+    while IFS=$'\t' read -r where name size; do
+        if [ "$where" = "$folder" ]; then entry -rw-r--r-- "$size" "$name"; fi
+    done <"$phone/files.tsv"
+}
+
+# `get REMOTE LOCAL`: only the database exists to copy, and nothing is overwritten.
+get() {
+    if [ "$1" != "$database" ]; then
+        printf "Error: Failed to read from file '%s': Not found (8)\n" "$1"
+    elif [ -e "$2" ]; then
+        printf "Error: Failed to overwrite existing file without '-f' option: %s\n" "$2"
+    else
+        sqlite3 "$2" <"$phone/MediaLibrary.sql"
+    fi
+}
+
+if [ "$#" -eq 1 ] && [ "$1" = -v ]; then
+    printf 'afcclient 1.4.0\n'
+    exit 0
+fi
+if [ "${1:-}" = -u ] && [ "$#" -ge 2 ]; then shift 2; fi
+if [ "${1:-}" != -- ]; then refuse "$@"; fi
+shift
+case "${1:-}" in
+    ls) if [ "$#" -eq 3 ] && [ "$2" = -l ]; then :; else refuse "$@"; fi ;;
+    get) if [ "$#" -eq 3 ] && [ "${2#-}" = "$2" ]; then :; else refuse "$@"; fi ;;
+    *) refuse "$@" ;;
+esac
+# afcclient's line when the phone is unplugged mid-command: on stdout, then exit 0.
+if [ "${FAKE_AFCCLIENT_DISCONNECT:-}" = 1 ]; then
+    printf '\n[disconnected]\n'
+    exit 0
+fi
+if [ "$1" = ls ]; then list "$3"; else get "$2" "$3"; fi

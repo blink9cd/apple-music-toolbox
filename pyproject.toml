@@ -1,0 +1,224 @@
+# Declared so that `pip install ".[refresh_tags]"` and `pip install ".[test]"` are the only install
+# steps the README gives. With no backend named, pip falls back to an implicit setuptools it
+# fetches unasked.
+[build-system]
+# 77 is the first setuptools to accept the SPDX `license` string in [project] (PEP 639).
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apple-music-toolbox"
+version = "0.1.0"
+description = "Tools for Apple Music on macOS: what was added most recently, an album's favorites, making Music.app reread changed tags, and auditing a library folder and a synced iPhone for missing files"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+#
+# 3.12, and DELIBERATELY BELOW the interpreter this was developed and gated on. The
+# floor is the oldest runtime the artifact must support, never the newest one on the
+# machine that built it: a newer target silently accepts syntax and APIs that crash on
+# an older one. It is NOT to be raised back to match a development box.
+#
+# Why this number, on macOS specifically. There is no long-term-support interpreter to
+# aim at: the only preinstalled python3 is the Command Line Tools' 3.9, which is below
+# what mypy (3.10 minimum) allows -- so every user of this project installs a Python,
+# and an installer gives a current one. That makes the floor a judgment rather than a
+# measurement.
+#
+# The cost this number buys, paid in this tree rather than left as a trap:
+# `help_formatter` is vendored and bound in every shipped CLI, because below 3.13
+# argparse stamps a misleading "(default: None)" onto a REQUIRED option.
+requires-python = ">=3.12"
+# Deliberately empty: the core tools are standard-library only, so a user of them installs
+# nothing. tag_refresh and library_audit use mutagen when it is installed, and the
+# `refresh_tags` extra below is that optional install: pip install ".[refresh_tags]".
+dependencies = []
+
+[project.optional-dependencies]
+# The optional mutagen tag_refresh and library_audit use, pinned to one exact release. The license was
+# read from the package metadata when pinned: mutagen GPL-2.0-or-later. A license can
+# change between versions, so re-read it on every bump.
+refresh_tags = [
+  # Reads each named MP3's album tag (tag_refresh), and the tags library_audit's
+  # track-number and album checks compare.
+  "mutagen==1.48.1",
+]
+# Everything the suites need. hypothesis drives the property tests and nothing at
+# runtime imports it. The `refresh_tags` pin is repeated here, exactly, because
+# tag_refresh's and library_audit's suites import mutagen, and naming `apple-music-toolbox[refresh_tags]`
+# instead would not work: a check that installs this extra's requirement strings on their
+# own, before the project itself, would find a self-reference naming a package not yet
+# installed and look it up on the package index.
+# tag_refresh/tests/test_public_pins.py fails when this extra stops listing any
+# `refresh_tags` pin exactly.
+test = [
+  "hypothesis==6.165.10",
+  "mutagen==1.48.1",
+]
+
+[tool.setuptools]
+# Deliberately empty. Every tool is run directly and puts its own sibling folders on
+# sys.path, so nothing here is imported from an installed location: installing this
+# distribution installs its metadata and whichever extra is asked for, never code. Left to
+# auto-discovery, setuptools refuses this flat layout of sibling folders outright.
+packages = []
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# E4/E7/E9/F are ruff's classic default set, written out so the enabled rules are a
+# function of this file rather than of whichever ruff release is installed. PGH003/PGH004
+# require every suppression to carry a rule code. D adds the docstring rules (pep257),
+# minus D401's imperative-mood opinion, which rewords valid noun-phrase summaries.
+select = ["E4", "E7", "E9", "F", "PGH003", "PGH004", "D"]
+ignore = ["D401"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+# Test method names self-document; a docstring per test would be noise.
+"**/test_*.py" = ["D"]
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+# Every tool puts these folders on sys.path at runtime, from the repository root
+# (stdio_utf8/stdio_utf8.md, "How this project's tools import it"). mypy cannot see a
+# runtime insert, so they are named here for it.
+mypy_path = [
+  "$MYPY_CONFIG_FILE_DIR/stdio_utf8",
+  "$MYPY_CONFIG_FILE_DIR/bounded_run",
+  # bounded_run.py puts its private src/ on sys.path at load time, which mypy cannot
+  # see either, so `import boundedrun_drain` needs its own entry or it is import-not-found.
+  "$MYPY_CONFIG_FILE_DIR/bounded_run/src",
+  "$MYPY_CONFIG_FILE_DIR/live_pid_guard",
+  "$MYPY_CONFIG_FILE_DIR/help_formatter",
+  "$MYPY_CONFIG_FILE_DIR/recently_added",
+  # tag_refresh, and its private src/, which its entry point and its suites put on
+  # sys.path at runtime where mypy cannot see it.
+  "$MYPY_CONFIG_FILE_DIR/tag_refresh",
+  "$MYPY_CONFIG_FILE_DIR/tag_refresh/src",
+  # The shared HTML page frame that library_audit, phone_audit and tag_refresh's
+  # refresh_report import, put on sys.path by each entry point's bootstrap.
+  "$MYPY_CONFIG_FILE_DIR/html_page",
+  # The two audits' private src/ folders, which each entry point and its suites put on
+  # sys.path at runtime where mypy cannot see it.
+  "$MYPY_CONFIG_FILE_DIR/library_audit/src",
+  "$MYPY_CONFIG_FILE_DIR/phone_audit/src",
+]
+
+# --- Gate configuration: the lint, test, scan and doc checks this tree is held to. ---
+
+[tool.pii_scan]
+# The license notice names the copyright holder, which is what it is for.
+exclude = ["LICENSE"]
+
+[tool.pii_scan.allow]
+# tag_refresh's hand-run sample library holds deliberately ZERO-BYTE `.mp3`
+# placeholders (its samples/README.md says why: the tool only stats each file and reads
+# its tag). Zero bytes cannot carry metadata, yet pii_scan rightly reports an empty file's
+# metadata as unread, a fail-closed BINARY_META finding, and that ruling stands for every
+# other file. This allowance excuses exactly that one cannot-read verdict in exactly this
+# folder: any real metadata tag, any other unreadable reason, and the text detectors all
+# still run there. The token is the scanner's own report text, naming the condition and
+# carrying no value. An allowance rather than an exclude, so nothing else goes unchecked;
+# one that stops matching (a placeholder gaining bytes) fails the run as a stale entry.
+# tag_refresh/tests/test_public_pins.py fails when this table and the one the tools are
+# gated with differ.
+"tag_refresh/samples/library" = [
+  "BINARY_META=metadata unreadable: exiftool read nothing (File is empty)",
+]
+# library_audit's hand-run sample holds zero-byte placeholders of the same kind, for the
+# same reason (its samples/README.md): a library folder, and one file outside it. Its
+# three tag-only files (an ID3 tag, no audio) are read like any binary and pass.
+"library_audit/samples/library" = [
+  "BINARY_META=metadata unreadable: exiftool read nothing (File is empty)",
+]
+"library_audit/samples/outside" = [
+  "BINARY_META=metadata unreadable: exiftool read nothing (File is empty)",
+]
+
+[tool.python_gate]
+# bounded_run ships the grandchild fixture its live boundary test launches, and which a
+# human can run by hand to watch the bound hold. It is an INPUT the test drives, not a
+# module of the tool -- and it deliberately never exits, so it could not be imported by
+# a paired test even in principle.
+exclude = ["bounded_run/samples"]
+
+[tool.samples_presence]
+# Libraries with no CLI: nothing in them turns an input into an output a human could run
+# by hand. recently_added's "output" is a list of AlbumRef -- never a file. stdio_utf8,
+# help_formatter, html_page and live_pid_guard are the same shape. bounded_run is deliberately NOT here: it does ship a
+# samples/ pair.
+exempt = [
+  "recently_added",
+  "stdio_utf8",
+  "help_formatter",
+  "html_page",
+  "live_pid_guard",
+]
+
+[tool.stdio_policy]
+# The whole tree, libraries included: a library is exactly where a stray print() does
+# not belong.
+paths = ["."]
+
+[tool.dep_audit]
+# Pinning checks only in the inner loop; the network CVE audit is run on demand.
+offline = "skip"
+
+[tool.gate_cache]
+# The variables whose value changes which tests run, so a verdict recorded with one
+# setting is never replayed into a run with another. APPLE_MUSIC_TOOLBOX_OFFLINE skips
+# every live boundary test: undeclared, an offline PASS would answer for an online run
+# and the live Music.app contract tests would never run.
+# TAG_REFRESH_LIVE_ALBUM names the album folder tag_refresh's live read-only lookup test
+# runs against; unset, that test skips, so it changes a verdict too.
+# PHONE_AUDIT_LIVE=1 runs phone_audit's live smoke test against the connected iPhone;
+# unset, it skips.
+# LIBRARY_AUDIT_LIVE=1 runs library_audit's live read-only listing test against the
+# running Music.app; unset, it skips.
+# tag_refresh/tests/test_env_declared.py fails when this list and the project's
+# environment reads, by literal or module-level constant, differ.
+env = [
+  "APPLE_MUSIC_TOOLBOX_OFFLINE",
+  "TAG_REFRESH_LIVE_ALBUM",
+  "PHONE_AUDIT_LIVE",
+  "LIBRARY_AUDIT_LIVE",
+]
+
+[tool.prose_terms]
+# Words this project's prose must not use, so they cannot creep back in. Third-person
+# attribution: a measurement's provenance stands without it ("measured on a real
+# library"), and whoever runs a tool is "the operator". Pointers to a design document,
+# to a ruling number in it, and to a standards file, none of which ship with this
+# project, resolve for no reader -- state the rule instead, or cite the section of a doc
+# here that does ship. No `paths`, so the whole project is in scope; the gate prunes
+# samples/ by name, so those READMEs are held to the same words by review. Each entry
+# waives itself: the declaration is not prose.
+terms = [
+  # prose: ignore[owner] the declaration itself
+  "owner",
+  # prose: ignore[spec] the declaration itself
+  "spec",
+  # prose: ignore[AGENTS] the declaration itself
+  "AGENTS",
+  # prose: ignore[R13] the declaration itself
+  "R13",
+  # The one consumer this project's record happened to have. Naming it taught a reader
+  # nothing -- this tool knows nothing about any particular consumer, and writes wherever
+  # the caller's --output points -- while resolving for nobody outside the tree it lived
+  # in. Describe the destination by what it IS ("a committed, published data file") and
+  # leave the consumer to name itself.
+  # prose: ignore[personal_site] the declaration itself
+  "personal_site",
+]
+
+[tool.prose_terms.patterns]
+# Shapes a single word cannot express: a pointer into a tracking list (the word "entry"
+# and a number), and a design decision's number (a capital D and one or two digits), each naming
+# a record no reader of this project has. State the rule or the measurement instead.
+entry-tag = '(?<![0-9A-Za-z_])entry\s+\d+'
+ruling-tag = '(?<![0-9A-Za-z_])(?-i:D)[1-9][0-9]?(?![0-9A-Za-z_])'
