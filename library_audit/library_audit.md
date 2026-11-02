@@ -53,7 +53,7 @@ library_audit.py --library <folder> [--format text|json|html] [--report <file>] 
 ## What it compares
 
 **The files.** Every audio file under `--library` (`.mp3`, `.m4a`, `.m4p`, `.aac`, `.aif`,
-`.aiff` and `.wav`, any case: what Music.app imports, so not `.flac`, which it does not), hidden files and hidden folders skipped, symbolic
+`.aiff`, and `.wav`, any case: what Music.app imports, so not `.flac`, which it does not), hidden files and hidden folders skipped, symbolic
 links to folders not followed. A folder it cannot read, and a file it cannot stat, are
 listed under `unreadable files and folders`, never skipped in silence.
 
@@ -73,9 +73,9 @@ library folder was named by. Each track then lands in exactly one place:
 | The track | Where it lands |
 | --- | --- |
 | its file is one of the walked files | matched to that file |
-| no location, or its file is gone, and its cloud status is `purchased`, `matched`, `uploaded` or `subscription` | counted as **cloud-only**, not listed: a copy exists in the cloud |
+| no location, or its file is gone, and its cloud status is `purchased`, `matched`, `uploaded`, or `subscription` | counted as "cloud-only", not listed: a copy exists in the cloud |
 | no location, or its file is gone, and any other cloud status | listed as a track whose file is gone |
-| its file exists outside `--library` | counted as **outside --library**, not listed |
+| its file exists outside `--library` | counted as "outside --library", not listed |
 
 A track whose file sits under `--library` but in a hidden folder, or with a suffix the walk
 does not collect, is counted as outside too: the walk never saw that file.
@@ -93,7 +93,7 @@ listed as gone rather than counted as cloud-only, which is the safe direction.
 
 **What an album is:** an album group is the album artist (the artist when that
 is empty), the album and the disc. A file's come from its tags; a Music.app track's from the
-listing's same three fields. Both sides are compared the same way: tab, linefeed and
+listing's same three fields. Both sides are compared the same way: tab, linefeed, and
 carriage return turned into spaces (as the listing script does), Unicode composed (NFC),
 surrounding spaces stripped, and case folded, so `Invented Album` and `INVENTED ALBUM` (with a trailing space) are
 one album; Music.app's disc `0` (none) is disc 1, as a file's absent disc tag is. An album
@@ -113,7 +113,7 @@ the unflagged, as Music.app splits it.
 **An iCloud placeholder's tags are never read from the file**, because opening it makes
 iCloud download it. A placeholder matched to a Music.app track takes its tags from that
 track's listing row instead: the album, the artist as the row gives it (the album artist,
-else the artist), the disc, the track number and the compilation flag, with no track count.
+else the artist), the disc, the track number, and the compilation flag, with no track count.
 The row holds what Music.app last read from the file, so the placeholder groups and is
 gap-checked as its file would be while the two agree. A file retagged outside Music.app
 since then (by another tagger) still groups by Music.app's older names, which can show as
@@ -166,7 +166,7 @@ differ as any such file does.
    strict comparison above makes them, as Music.app keeps them. Pairs join into one
    finding, so an album split three ways is one finding, but never by chaining: a group
    joins only when its names and count tag match every group already joined, so of
-   `P / X`, `P / Y` and `R / Y` the outer two never meet. A joined album never holds one
+   `P / X`, `P / Y`, and `R / Y` the outer two never meet. A joined album never holds one
    number twice. The pair holding the most tracks together joins first (then report
    order), and a group that would then repeat a number, or fail to match a member, is
    left out of the join and keeps its own gap.
@@ -210,7 +210,7 @@ differ as any such file does.
    counts toward that folder group; that folder is found by device and inode, or by the
    path text (separators and dots collapsed, composed) when it cannot be stat. Otherwise a
    gone track with no location, or one whose location lies inside `--library`, counts
-   toward its listed album, artist and disc. One whose location lies outside `--library` is
+   toward its listed album, artist, and disc. One whose location lies outside `--library` is
    left out, as the tracks outside are: inside means its folder, or a folder above it,
    stats to the library folder's device and inode, or failing that its path text lies
    under the library folder's. A gone track left out here is still listed under check 2.
@@ -226,7 +226,7 @@ differ as any such file does.
 ## The sync checks: what this Mac can see of a track that will not sync
 
 A track that stops reaching an iPhone by a Finder sync can be stopped on either side. These
-checks list the causes visible on this Mac. **They see the Mac only.** Music.app's
+checks list the causes visible on this Mac. They see the Mac only. Music.app's
 scripting dictionary has no iPhone source, so no call can see the phone's copy: a track the
 phone lists but cannot play, the fault that prompted these checks, is invisible here, and a
 clean report does not clear the phone. The text report closes its sync sections with one
@@ -247,7 +247,7 @@ checks above, which take a placeholder's tags from its Music.app track instead.
 3. **Music.app's size out of step with the file**: a matched track whose listed size is
    known and not 0 but differs from its file's `st_size`, listed with both numbers. Music.app's
    record is stale; `tag_refresh` makes it read the file again. A track listing no size (0) is
-   not judged. A size the listing gives as anything but plain digits is **unknown**: never a
+   not judged. A size the listing gives as anything but plain digits is "unknown": never a
    mismatch, and counted in the summary's `sizes unknown`. A finding.
 4. **Unchecked tracks**: every listed track whose `enabled` is false, wherever it was placed.
    Such a track is skipped only when the phone syncs "only checked songs", but anything listed
@@ -262,7 +262,7 @@ checks above, which take a placeholder's tags from its Music.app track instead.
    finding with `afconvert`'s last line (stderr first, then stdout, else its exit code).
    Placeholders and files that cannot be read are skipped and counted, never decoded. One
    progress line goes to stderr per 500 files. An `afconvert` that cannot be started at all
-   ends the run with exit `2` and no report. **A pass is not proof**: `afconvert` tolerates
+   ends the run with exit `2` and no report. A pass is not proof: `afconvert` tolerates
    some damage, so a file that decodes may still fail elsewhere.
 
 ```text
@@ -326,7 +326,7 @@ Here the album's tag group holds three files (tracks 1 and 12, and the unnumbere
 track) against four Music.app tracks (those three, and the gone track 2), while the bonus
 file, whose tags cannot be read, is judged by its folder. The duo's five files spell its
 name two ways, which print alike: each spelling is numbered, a `differ` line names the
-characters each pair of spellings differs in (artist, album or both), and the header ends
+characters each pair of spellings differs in (artist, album, or both), and the header ends
 with the numbers the joined album still lacks, when it lacks any. A difference is cut short
 after three changes, and a change after three characters a side, each saying how many more
 there are. A gone track with no
@@ -361,7 +361,7 @@ character escaped):
 | `decode_failed` | one object a file that did not decode: `path`, `reason`; null when `--decode` was not given |
 | `decode_skipped` | how many matched files the decode skipped, placeholders and files that cannot be read; null when `--decode` was not given |
 
-**The report is the library's own data.** It holds album, artist and file names, so it never
+**The report is the library's own data.** It holds album, artist, and file names, so it never
 belongs in a repository: `--report` refuses any path inside a git working tree, judged by a
 `.git` entry in the target's folder or any folder above it, symbolic links resolved. The file
 is written to a temporary file beside it and renamed over it, so a reader never sees half a
@@ -376,7 +376,7 @@ name: `--report audit.html` with the default format writes text.
 
 The page is rendered from the very object the JSON format serializes, so the two never
 disagree. It is one self-contained HTML5 document: inline CSS, no script, and nothing a
-browser would fetch (no font, image or stylesheet), in light and dark. It holds:
+browser would fetch (no font, image, or stylesheet), in light and dark. It holds:
 
 - a header: the library folder and the tallies (audio files, Music.app tracks, findings,
   cloud-only, outside the library, sizes unknown, and decode skipped when `--decode` ran);
@@ -390,7 +390,7 @@ browser would fetch (no font, image or stylesheet), in light and dark. It holds:
 
 Every name is escaped, and shown with each control character as a visible `\xNN`, as in the
 text report. Tables scroll sideways inside their own frame, so on a phone the page itself
-does not. The frame (the style, the tables, the summary and the escape) is the shared
+does not. The frame (the style, the tables, the summary, and the escape) is the shared
 `html_page` library in `html_page/` at the project root (`html_page.md` there), found
 at one fixed place on `sys.path`; `phone_audit`'s page is laid out in it too.
 
@@ -421,18 +421,18 @@ track that is not a file track), album, artist, compilation flag (`true` or `fal
 track's class (`file track`, `shared track`, `URL track`), the enabled flag (`true` or
 `false`) and the size in bytes; a new field goes at the end, so the fields before it keep
 their places. A missing disc or track number reads as 0, a missing name as empty, a missing
-size as 0. **AppleScript integers stop at 536,870,911**: a larger size arrives as a real,
+size as 0. AppleScript integers stop at 536,870,911: a larger size arrives as a real,
 which AppleScript writes in exponent form (`6.0E+8`), not an exact integer. The script
 therefore writes each size as millions and the rest, each an exact integer, the rest padded
 to six digits, so every size is plain decimal digits; the parser takes up to fifteen digits
 as exact and reads anything else as an unknown size, counted, never a mismatch. The
 rows are built after the script's `tell` block, so no step of building them is sent to
 Music.app, and joined once rather than appended one by one. Album and artist names have each
-tab, linefeed and carriage return turned into a space inside the script, so no name can
+tab, linefeed, and carriage return turned into a space inside the script, so no name can
 split a row; a row whose path holds one is counted as an unparsed row, a finding, since that
 track could not be placed.
 
-**A failed, timed-out or refused call ends the run with exit `2` and no report.** A partial
+**A failed, timed-out, or refused call ends the run with exit `2` and no report.** A partial
 listing would report every unlisted track's file as having no track, which is worse than no
 report. So each listing is confirmed, not trusted: the script compares the lengths of the
 property lists it read and errors when they differ (one track's path would otherwise
@@ -461,7 +461,7 @@ re-run before acting on it.
 ## Tests
 
 `test_library_audit.py` runs every suite in `tests/`. None reaches Music.app, the real
-library, the network or anything outside a temporary directory: every call goes through a
+library, the network, or anything outside a temporary directory: every call goes through a
 fake runner that plays `osascript` from an invented library and records each argument list,
 so a suite asserts that the `is running` probe came first and that nothing but the three
 reading scripts was ever sent. The access check and the decoder are fakes too: no test

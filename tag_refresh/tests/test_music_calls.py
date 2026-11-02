@@ -1,6 +1,6 @@
 """The AppleScript calls tag_refresh makes, driven through a fake runner.
 
-Every test here hands `music_calls` a FAKE runner that records each argv and answers
+Every test here hands `music_calls` a fake runner that records each argv and answers
 with a canned `CompletedProcess`; nothing spawns a real `osascript`, so nothing can
 reach Music.app, the library or the host. The scripts are checked as text (no name
 ever inside a body, the in-script bound present, no `tell` in the probe) and every

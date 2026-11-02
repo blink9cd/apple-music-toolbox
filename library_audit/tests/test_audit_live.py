@@ -215,11 +215,18 @@ def _live_class_under(environ: dict[str, str], platform: str) -> type:
     )
     assert location is not None and location.loader is not None
     module = importlib.util.module_from_spec(location)
-    with (
-        mock.patch.dict(os.environ, environ, clear=True),
-        mock.patch.object(sys, "platform", platform),
-    ):
-        location.loader.exec_module(module)
+    # Registered under its own name for the re-evaluation only: a dataclass in the file
+    # reads sys.modules[cls.__module__] while its body runs. The skip markers it decides
+    # are the same either way, so registering changes nothing this test proves.
+    sys.modules[location.name] = module
+    try:
+        with (
+            mock.patch.dict(os.environ, environ, clear=True),
+            mock.patch.object(sys, "platform", platform),
+        ):
+            location.loader.exec_module(module)
+    finally:
+        del sys.modules[location.name]
     return module.LiveTest
 
 

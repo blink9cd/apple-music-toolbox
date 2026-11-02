@@ -2,7 +2,7 @@
 
 `test_music_calls_tracks.py` reads `LOOKUP_SCRIPT` as text and drives a fake runner,
 which proves what this side sends and nothing about what Music answers. The lookup's
-first form passed every one of those tests and returned NO rows live: inside
+first form passed every one of those tests and returned no rows live: inside
 `tell application "Music"`, `POSIX path of (location of t)` went to Music as part of
 the object specifier and Music answered -1728 for every track. Only a real call can
 catch that class of defect, so this file makes exactly one.
@@ -38,7 +38,8 @@ import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
 
 # The album folder whoever runs this chose; its name is the album name looked up.
 _ALBUM_ENV = "TAG_REFRESH_LIVE_ALBUM"
-# The project's offline switch, shared with album_scan's live tests.
+# The project's offline switch, shared with the other live tests here and with
+# album_scan's, in the separate media_feeds project.
 _OFFLINE_ENV = "APPLE_MUSIC_TOOLBOX_OFFLINE"
 
 # The three fields of one row, each in the shape Music reports it.

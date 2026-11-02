@@ -41,9 +41,9 @@ SRC_DIR = Path(__file__).resolve().parent / "src"
 #: tool folder's ``src/``, one fixed place under the project root.
 SEAM_DIR = Path(__file__).resolve().parents[1] / "tag_refresh" / "src"
 sys.path[:0] = [str(SRC_DIR), str(SEAM_DIR)]
-# The shared libraries, each at ONE fixed place: directly under the project root, which
-# is this file's grandparent. Deliberately not a search up the ancestors -- that would
-# also put any same-named folder ABOVE the checkout on sys.path, and whatever it holds
+# The shared libraries, each at one fixed place: directly under the project root, which
+# is this file's grandparent. Deliberately not a search up the ancestors: that would
+# also put any same-named folder above the checkout on sys.path, and whatever it holds
 # would be imported in place of the real module. See stdio_utf8/stdio_utf8.md, "How this
 # project's tools import it".
 sys.path += [
@@ -137,9 +137,9 @@ class _HelpFormatter(
 ):
     """Every real default shown, the epilog's breaks kept.
 
-    The two bases override different methods, so they compose. A default of None is no
-    value a person could type, so it is not shown: each such option's help says instead
-    what leaving it out means.
+    The two bases override different methods, so they compose. A default of None, which
+    --decode takes in place of False, is no value a person could type, so it is not
+    shown: each such option's help says instead what leaving it out or giving it means.
     """
 
     def _get_help_string(self, action: argparse.Action) -> str | None:
@@ -219,6 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--decode",
         action="store_true",
+        default=None,
         help="Also decode every matched, local, readable file in full with afconvert, "
         "listing each that does not decode. Slow: hours on a large library.",
     )
@@ -471,7 +472,7 @@ def main(argv: Sequence[str] | None = None, *, wiring: Wiring | None = None) -> 
         )
         return audit_report.EXIT_USAGE
     try:
-        audit = _audit(Path(os.path.abspath(args.library)), wiring, args.decode)
+        audit = _audit(Path(os.path.abspath(args.library)), wiring, bool(args.decode))
     # An afconvert that cannot start (--decode) cannot run the audit either.
     except (_CannotStart, audit_sync.DecodeUnavailable) as refusal:
         _notice(f"{parser.prog}: {refusal}")
@@ -483,8 +484,7 @@ def main(argv: Sequence[str] | None = None, *, wiring: Wiring | None = None) -> 
         return audit_report.EXIT_INTERRUPTED
     try:
         return _deliver(args, audit, parser.prog)
-    # A --report file is left as it was (the write is atomic); printed text may stop
-    # part way, which the notice says.
+    # The atomic write leaves a --report file as it was; printed text may stop part way.
     except KeyboardInterrupt:
         _notice(f"{parser.prog}: interrupted; the report is incomplete or not written")
         return audit_report.EXIT_INTERRUPTED

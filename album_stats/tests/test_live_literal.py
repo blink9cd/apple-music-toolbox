@@ -1,27 +1,27 @@
 """One live pass through the real AppleScript compiler, for the literal escape.
 
 `album_stats/test_album_stats.py` proves the escape by reading the generated
-SOURCE -- `assertIn('album is "The \\"Blue\\" Album"', script)` and its siblings. That
+source: `assertIn('album is "The \\"Blue\\" Album"', script)` and its siblings. That
 pins the characters this side of the boundary and nothing beyond it: whether the
 compiler on the other side reads those characters back as the name they came from is
 an assumption those tests cannot fail on. Escaping that crosses a quoting layer has
-to be proven by BEHAVIOR rather than by reading the characters it produced, and this
-is that layer -- a name that escaped its literal would stop being data and become
-AppleScript SOURCE, in a language where `do shell script` exists.
+to be proven by behavior rather than by reading the characters it produced, and this
+is that layer: a name that escaped its literal would stop being data and become
+AppleScript source, in a language where `do shell script` exists.
 
 So each name below is escaped, spliced into a script, compiled and evaluated for real,
 and the value that comes back must equal the name that went in. With the `translate`
 pass removed, `x" & "INJECTED" & "y` comes back as `xINJECTEDy`: the middle stopped
 being text and became a concatenation the compiler performed.
 
-**Nothing here reaches Music.app, the network, or any library.** The script is a bare
-`return "<literal>"` -- no `tell` block, no application, no property read -- so it
-compiles and answers inside `osascript` itself. That is why it is NOT gated on
+Nothing here reaches Music.app, the network, or any library. The script is a bare
+`return "<literal>"` (no `tell` block, no application, no property read), so it
+compiles and answers inside `osascript` itself. That is why it is not gated on
 `APPLE_MUSIC_TOOLBOX_OFFLINE`, which means "no Music.app and no network": this makes neither
 kind of call, and gating it there would leave the one test that actually crosses the
 boundary skipped in exactly the runs that gate the code.
 
-The interpreter is named by its ABSOLUTE path on purpose. A session working offline
+The interpreter is named by its absolute path on purpose. A session working offline
 puts a fake `osascript` first on `PATH` so nothing can reach the library by accident,
 and a fake answering this script would leave every assertion below passing while
 proving nothing whatever: a test whose subject can be shadowed by something earlier on
@@ -52,7 +52,7 @@ _OSASCRIPT = Path("/usr/bin/osascript")
 _COMPILE_TIMEOUT_SECONDS = 20.0
 
 #: `osascript` terminates its printed result with one newline of its own. Removing
-#: exactly one -- not `.strip()` -- is what lets a name that legitimately ends in
+#: exactly one, not `.strip()`, is what lets a name that legitimately ends in
 #: whitespace, or spans two lines, still be compared for equality.
 _RESULT_TERMINATOR = "\n"
 

@@ -20,8 +20,13 @@ included, so no name can become markup. `shown` is public because a tool's plain
 report needs the same escape for its own lines.
 
 `ParsedPage` and `page_problems` are the check every tool's tests hold a page to: a
-strict parse, each element closed in order, each id once, each link an anchor on the
-page, and nothing that would fetch or run. One copy serves every tool's suite.
+strict parse, each element closed in order, each id once, no attribute twice on one
+element, each link an anchor on the page, no URL-bearing attribute (a ``srcdoc`` among
+them), event handler or style attribute, and nothing in the markup or in an attribute's
+decoded value that would fetch or run. The markup is the tags, their attributes,
+comments and the style and script elements' content; CSS is also read with its escapes
+decoded. The page's text is left out, so an escaped name that reads like a fetch
+(``AC//DC``) is not one. One copy serves every tool's suite.
 
 Entry point assumptions
 -----------------------
@@ -32,6 +37,7 @@ A library with no CLI and no I/O: importers put this folder on ``sys.path`` (see
 from __future__ import annotations
 
 import html
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -228,20 +234,29 @@ def page(
     read_only: str,
     footer: Sequence[str] = (),
     extra_css: str = "",
+    generator: str | None = None,
 ) -> str:
     """The whole document.
 
     *title* heads the page and names it; *header* follows the title inside the page
     header, *main* is the summary and the sections, and the footer holds *read_only*,
     then each line of *footer*, each a paragraph of plain text. *extra_css* is the
-    tool's own rules, after the shared ones.
+    tool's own rules, after the shared ones. *generator*, when given, names the tool
+    in a ``generator`` meta element, a fixed line the tool can know its own page by;
+    left out, the page is byte for byte the page without it.
     """
     shown_title = html.escape(title)
+    named = (
+        []
+        if generator is None
+        else [f'<meta name="generator" content="{html.escape(generator)}">']
+    )
     lines = [
         "<!DOCTYPE html>",
         '<html lang="en">',
         "<head>",
         '<meta charset="utf-8">',
+        *named,
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{shown_title}</title>",
         f"<style>\n{CSS}{extra_css}</style>",
@@ -265,18 +280,108 @@ def page(
 
 # --- The check -----------------------------------------------------------------------
 
-#: The elements that take no end tag, so the parse never waits for one.
-VOID_ELEMENTS = frozenset({"meta", "br", "hr", "img", "link", "input", "wbr"})
+#: The elements that take no end tag, so the parse never waits for one: HTML's void
+#: elements, ``param`` (obsolete, but still void to a browser) among them.
+VOID_ELEMENTS = frozenset(
+    "area base br col embed hr img input link meta param source track wbr".split()
+)
 #: What would make a browser fetch or run something, as it would appear in a page,
-#: matched against the page lowercased.
-FETCHING = ("<script", "http", "//", "url(", "@import", "<link", " src=")
+#: matched lowercased against the page's markup (`ParsedPage.markup`) and against each
+#: attribute's decoded value (`ParsedPage.values`), never its text. A scheme is matched
+#: with its colon, so an attribute named ``http-equiv`` is no fetch.
+FETCHING = (
+    "<script",
+    "javascript:",
+    "http:",
+    "https:",
+    "//",
+    "url(",
+    "image-set(",
+    "@import",
+    "<link",
+    " src=",
+)
+#: The attributes whose value a browser may fetch, or send a request to, other than
+#: ``href``, which is checked as a link. ``xlink:href`` is SVG's older link.
+URL_ATTRIBUTES = frozenset(
+    "action background cite data formaction longdesc manifest ping poster src srcset"
+    " xlink:href".split()
+)
+#: The attributes whose value is a whole document a browser renders: reported whatever
+#: they hold, since a document can run or fetch in more ways than any marker names.
+DOCUMENT_ATTRIBUTES = frozenset({"srcdoc"})
+#: A meta element's ``http-equiv`` value that makes its ``content`` a URL to load.
+_REFRESH = "refresh"
+#: The element whose content is CSS.
+_STYLE = "style"
+#: The elements whose content is code, not text: their content counts as markup.
+_CODE_ELEMENTS = frozenset({_STYLE, "script"})
+#: What starts an event handler's attribute name.
+_HANDLER_PREFIX = "on"
+#: A CSS escape: a backslash and 1-6 hex digits with one optional whitespace after (a CRLF
+#: pair is one), or a backslash before any other character (CSS Syntax).
+_CSS_ESCAPE = re.compile(
+    r"\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(.))", re.DOTALL
+)
+#: Past the last code point, or a surrogate or NUL, a hex escape reads as U+FFFD.
+_MAX_CODE_POINT = 0x10FFFF
+_SURROGATES = range(0xD800, 0xE000)
+
+
+def _css_code_point(match: re.Match[str]) -> str:
+    """The character the CSS escape *match* stands for."""
+    digits, other = match.groups()
+    if digits is None:
+        return str(other)
+    code = int(digits, 16)
+    bad = code == 0 or code > _MAX_CODE_POINT or code in _SURROGATES
+    return "�" if bad else chr(code)
+
+
+def css_unescaped(text: str) -> str:
+    r"""CSS *text* with each escape decoded, as a browser's CSS parser reads it.
+
+    ``u\72l(`` is ``url(`` and ``\@import`` is ``@import``.
+    """
+    return _CSS_ESCAPE.sub(_css_code_point, text)
+
+
+def _repeated_names(attrs: list[tuple[str, str | None]]) -> list[str]:
+    """Each attribute name given more than once among *attrs*, once, in page order."""
+    names = [name for name, _ in attrs]
+    return list(dict.fromkeys(name for name in names if names.count(name) > 1))
+
+
+def _first_of_each(attrs: list[tuple[str, str | None]]) -> dict[str, str | None]:
+    """Each attribute name with its first value, the one a browser keeps."""
+    named: dict[str, str | None] = {}
+    for name, value in attrs:
+        named.setdefault(name, value)
+    return named
+
+
+def _is_source(tag: str, name: str, named: dict[str, str | None]) -> bool:
+    """Whether attribute *name* of *tag*, among *named*, holds a URL a browser loads."""
+    if name in URL_ATTRIBUTES or name in DOCUMENT_ATTRIBUTES:
+        return True
+    # A refresh meta element loads the URL in its content, after its delay.
+    refresh = (named.get("http-equiv") or "").lower() == _REFRESH
+    return tag == "meta" and name == "content" and refresh
 
 
 class ParsedPage(HTMLParser):
     """A page parsed whole, raising ValueError on an element closed out of order.
 
     ``stack`` is what stays open at the end; ``ids``, ``links`` (each ``href``),
-    ``sources`` (each ``src``) and ``text`` are recorded in page order.
+    ``sources`` (each URL-bearing attribute, as ``name=value``), ``handlers`` (each
+    ``on*`` attribute, as its tag and name), ``styles`` (each ``style`` attribute),
+    ``repeated`` (each attribute given twice on one element, as its tag and name),
+    ``sheets`` (each style element's content), ``values``, ``markup`` and ``text`` are
+    recorded in page order. Of an attribute given twice, its first value is the one
+    recorded, as a browser keeps it. ``values`` is each attribute's value with its
+    character references decoded; ``markup`` is each start tag as written, each
+    comment, and the content of each style and script element; ``text`` is every
+    element's content.
     """
 
     def __init__(self, page: str) -> None:
@@ -286,20 +391,43 @@ class ParsedPage(HTMLParser):
         self.ids: list[str] = []
         self.links: list[str] = []
         self.sources: list[str] = []
+        self.handlers: list[str] = []
+        self.styles: list[str] = []
+        self.repeated: list[str] = []
+        self.sheets: list[str] = []
+        self.values: list[str] = []
+        self.markup: list[str] = []
         self.text: list[str] = []
         self.feed(page)
         self.close()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Open *tag* unless it is void; record its id, link and source."""
-        named = dict(attrs)
+        """Open *tag* unless it is void; record it and what its attributes hold."""
+        self.markup.append(self.get_starttag_text() or "")
+        named = _first_of_each(attrs)
+        # The parser lowercases attribute names, so TITLE repeats title.
+        self.repeated += (f"{tag} {name}" for name in _repeated_names(attrs))
         for key, into in (
             ("id", self.ids),
             ("href", self.links),
-            ("src", self.sources),
+            ("style", self.styles),
         ):
             if named.get(key) is not None:
                 into.append(str(named[key]))
+        # The parser decodes character references in a value, so an encoded marker
+        # (``&lt;script&gt;`` in a srcdoc) is matched as the browser would read it.
+        self.values += (value for _, value in attrs if value is not None)
+        self.sources += (
+            f"{name}={value}"
+            for name, value in attrs
+            if value is not None and _is_source(tag, name, named)
+        )
+        # The parser lowercases attribute names, so ONCLICK is caught as onclick.
+        self.handlers += (
+            f"{tag} {name}" for name, _ in attrs if name.startswith(_HANDLER_PREFIX)
+        )
+        if tag == _STYLE:
+            self.sheets.append("")
         if tag not in VOID_ELEMENTS:
             self.stack.append(tag)
 
@@ -310,8 +438,29 @@ class ParsedPage(HTMLParser):
         self.stack.pop()
 
     def handle_data(self, data: str) -> None:
-        """Keep the text."""
+        """Keep the text; inside a style or script element, keep it as markup too."""
         self.text.append(data)
+        if self.stack and self.stack[-1] in _CODE_ELEMENTS:
+            self.markup.append(data)
+        if self.stack and self.stack[-1] == _STYLE:
+            self.sheets[-1] += data
+
+    def handle_comment(self, data: str) -> None:
+        """Keep a comment as markup: what it holds is no text a reader sees."""
+        self.markup.append(f"<!--{data}-->")
+
+
+def _read_pieces(parsed: ParsedPage) -> list[str]:
+    """Each piece of *parsed* that `FETCHING` is matched against, lowercased.
+
+    The markup whole; each decoded attribute value on its own, so no marker spans two;
+    and each style attribute and style element with its CSS escapes decoded, a style
+    element's content also with its character references decoded first, as a browser
+    does inside SVG or MathML.
+    """
+    css = chain(parsed.styles, parsed.sheets, map(html.unescape, parsed.sheets))
+    pieces = chain(["".join(parsed.markup)], parsed.values, map(css_unescaped, css))
+    return [piece.lower() for piece in pieces]
 
 
 def page_problems(page: str) -> list[str]:
@@ -326,13 +475,18 @@ def page_problems(page: str) -> list[str]:
         if anchor in seen:
             found.append(f"id repeated: {anchor}")
         seen.add(anchor)
+    found.extend(f"attribute repeated: {repeat}" for repeat in parsed.repeated)
     on_page = {f"#{anchor}" for anchor in seen}
     found.extend(
         f"link not on the page: {link}" for link in parsed.links if link not in on_page
     )
     found.extend(f"source: {source}" for source in parsed.sources)
-    lowered = page.lower()
+    found.extend(f"handler: {handler}" for handler in parsed.handlers)
+    found.extend(f"style attribute: {style}" for style in parsed.styles)
+    lowered = _read_pieces(parsed)
     found.extend(
-        f"fetches or runs: {marker}" for marker in FETCHING if marker in lowered
+        f"fetches or runs: {marker}"
+        for marker in FETCHING
+        if any(marker in piece for piece in lowered)
     )
     return found

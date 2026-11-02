@@ -1,10 +1,10 @@
-"""Every environment variable this project reads by name is declared to the gate cache.
+"""Every environment variable this project reads by name is declared in pyproject.toml.
 
-`APPLE_MUSIC_TOOLBOX_OFFLINE` skips every live boundary test, so it changes a gate verdict
-without changing one file. The workspace gate's verdict cache folds in only the variables
-that `[tool.gate_cache] env` in this project's pyproject.toml declares. An undeclared one
-lets a verdict recorded with it unset be replayed into a run with it set, and the
-reverse -- an online sweep replaying an offline PASS never runs the live tests at all.
+`APPLE_MUSIC_TOOLBOX_OFFLINE` skips every live boundary test, so it changes what a test
+run proves without changing one file. `[tool.gate_cache] env` in this project's
+pyproject.toml lists every variable of that kind, so anything that records a run's
+result can record the settings it depended on, and a pass with the live tests skipped
+is never mistaken for one that ran them.
 
 So this test fails on a read nothing declares, or one whose name it cannot resolve, which stops a new switch landing without
 its declaration, and on a declaration nothing reads, which stops a renamed switch leaving
@@ -12,16 +12,16 @@ a stale name behind. It sits under tag_refresh only because a test must live und
 tool; it scans every tool folder in this project, and skips the vendored shared
 libraries for the reason recorded beside `_VENDORED`.
 
-One narrow class is held apart: a CREDENTIAL. Folding a token's value into a persisted
+One narrow class is held apart: a credential. Folding a token's value into a persisted
 cache key would write a secret's fingerprint to disk, and a credential never changes which
 tests run, since every suite that could reach one clears it first. So `_CREDENTIAL_READS`
 names each such variable with its reason. The read stays visible to this scan rather than
-hidden from it: an exempted name must still be read somewhere OUTSIDE the tests, so a
+hidden from it: an exempted name must still be read somewhere outside the tests, so a
 stale exemption fails just as a stale declaration does, and a test's own read cannot keep
 one alive. An exempted name may never be declared as well.
 
 A second narrow class is held apart for the same two checks: a variable every suite that
-could read it REDIRECTS (a config directory pointed under a temporary HOME), so its value
+could read it redirects (a config directory pointed under a temporary HOME), so its value
 never reaches a verdict, while declaring it would only split the cache by machine layout.
 """
 
@@ -42,12 +42,12 @@ _MAPPINGS = frozenset({"os.environ", "environ"})
 _KNOWN_SWITCH = "APPLE_MUSIC_TOOLBOX_OFFLINE"
 
 # The vendored shared libraries, skipped by the scan below. Their environment use is
-# test-fixture plumbing -- a pid-file path a test exports for one child and reads back --
+# test-fixture plumbing (a pid-file path a test exports for one child and reads back),
 # not a switch that changes which tests run, so declaring it would say something untrue.
 # Two of those reads name a variable no static scan can resolve (a function parameter,
 # and a constant read through its module), which is exactly the shape this scan refuses
-# in this project's OWN code. Excluded by name rather than by listing the tool folders,
-# so a tool folder added later is scanned by default -- the safe direction.
+# in this project's own code. Excluded by name rather than by listing the tool folders,
+# so a tool folder added later is scanned by default, which is the safe direction.
 _VENDORED = frozenset(
     {"stdio_utf8", "help_formatter", "html_page", "bounded_run", "live_pid_guard"}
 )
@@ -104,7 +104,7 @@ def _names_read(source: str) -> tuple[set[str], list[str]]:
     """Every name *source* reads from the environment, and each read it cannot name.
 
     A key resolves when it is a string literal or a module-level constant bound to one.
-    Anything else comes back as ``"<line>: <read>"`` so the test FAILS on it: skipping a
+    Anything else comes back as ``"<line>: <read>"`` so the test fails on it: skipping a
     read the scan cannot name would reopen the gap it exists to close.
     """
     tree = ast.parse(source)

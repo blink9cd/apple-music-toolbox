@@ -1,10 +1,10 @@
 """Tests for recently_added: Apple Music's own "date added" via AppleScript.
 
-Every test here drives a FAKE `run` -- nothing in this file spawns a real `osascript`
+Every test here drives a fake `run`: nothing in this file spawns a real `osascript`
 process or touches Music.app. `_real_run` is the real-process seam and is exercised
-end to end only by the live tests, such as `album_scan/tests/test_live_music.py`, as
-`cover_art.py`'s `_real_fetch` is proven only by
-`cover_art/tests/test_live_artwork.py`.
+end to end only by the live tests of the separate media_feeds project, such as
+`album_scan/tests/test_live_music.py`, as `cover_art.py`'s `_real_fetch` there is
+proven only by `cover_art/tests/test_live_artwork.py`.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def _completed(returncode: int, stdout: str) -> subprocess.CompletedProcess[str]
 class NewestAlbumsFromMusicTest(unittest.TestCase):
     """The never-raises contract: every failure mode below returns `[]`.
 
-    The AppleScript emits one row per TRACK (Music.app has no per-album "date
+    The AppleScript emits one row per track (Music.app has no per-album "date
     added"), so these also pin the collapse before ranking. A duplicate album
     cannot appear in a result of size one, so the collapse tests ask for more.
     """
@@ -53,7 +53,7 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
         )
 
     def test_a_twelve_track_album_appears_once_not_twelve_times(self) -> None:
-        """The AppleScript emits one row per TRACK. Without a dedupe by
+        """The AppleScript emits one row per track. Without a dedupe by
         (artist, album), --count 3 on a freshly-added album returns the same
         album three times.
         """
@@ -72,8 +72,8 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
         self.assertEqual(refs[0].album, "One Album")
 
     def test_an_album_takes_its_newest_track_as_its_added_date(self) -> None:
-        # An album whose tracks were added on different days must report the LATER
-        # date -- the point of grouping before ranking, not merely deduplicating.
+        # An album whose tracks were added on different days must report the later
+        # date: the point of grouping before ranking, not merely deduplicating.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
             return _completed(
                 0,
@@ -87,7 +87,7 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
     def test_an_earlier_duplicate_row_arriving_second_does_not_override_the_newest(
         self,
     ) -> None:
-        # The mirror of the test above: proves the FALSE arm of the per-album
+        # The mirror of the test above: proves the false arm of the per-album
         # "is this row newer than what we already kept" comparison is also
         # reachable and correct, not merely "whichever row is seen last wins".
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
@@ -111,10 +111,10 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
         self.assertEqual([r.album for r in refs], ["Newer", "Older"])
 
     def test_the_newest_album_leads_even_when_its_name_sorts_first(self) -> None:
-        # The ranking key is the DATE, not the album reference. In the test above
+        # The ranking key is the date, not the album reference. In the test above
         # the two orders agree by accident ("B" > "A" and newer > older), so a
         # rank keyed on the reference passes it. Here they disagree: the newest
-        # album's artist sorts FIRST alphabetically, so only a date-keyed rank
+        # album's artist sorts first alphabetically, so only a date-keyed rank
         # puts it first.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
             return _completed(
@@ -159,8 +159,8 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
     def test_an_empty_album_artist_is_skipped_not_grouped_as_a_real_album(self) -> None:
         # AppleScript reports an unset `album artist` (a compilation, a track with no
         # album artist tag) as "", not an error. Without this guard an empty-artist
-        # row would group and rank as a genuine album -- AlbumRef(artist="",
-        # album="Untitled Compilation") -- so --source auto would never fall back to
+        # row would group and rank as a genuine album, AlbumRef(artist="",
+        # album="Untitled Compilation"), so --source auto would never fall back to
         # the folder scan, and the record would carry a blank artist.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
             return _completed(
@@ -195,7 +195,7 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
 
     def test_every_candidate_with_an_empty_field_yields_no_albums(self) -> None:
         # Not an accidental empty result: this is the caller's fallback signal
-        # working as designed when NOTHING complete is available -- --source auto
+        # working as designed when nothing complete is available: --source auto
         # then falls back to the folder scan rather than writing a record with a
         # blank field.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
@@ -208,10 +208,10 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
         self.assertEqual(newest_albums_from_music(1, run=run), [])
 
     def test_a_quote_in_the_album_name_parses_correctly(self) -> None:
-        # The script never interpolates track text INTO the AppleScript source (only
+        # The script never interpolates track text into the AppleScript source (only
         # the integer lookback-days constant is interpolated), so a quote in a real
-        # album title poses no escaping risk to the script itself -- this proves the
-        # PARSE side is equally unaffected: a quote is not one of the two delimiters
+        # album title poses no escaping risk to the script itself. This proves the
+        # parse side is equally unaffected: a quote is not one of the two delimiters
         # (tab, linefeed), so it must pass through byte-for-byte rather than being
         # stripped or mis-split.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
@@ -223,8 +223,8 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
     def test_a_tab_embedded_in_a_name_causes_that_line_to_be_skipped(self) -> None:
         # Tab is the field separator (see `_MUSIC_SCRIPT`'s comment: not "|", which
         # has appeared in band names). When a name does contain a tab, the failure
-        # mode is to SKIP the malformed line (it no longer has exactly 3 fields),
-        # never a mis-split record -- falling through to the next complete, valid
+        # mode is to skip the malformed line (it no longer has exactly 3 fields),
+        # never a mis-split record, falling through to the next complete, valid
         # candidate exactly like the empty-field and bad-date cases above, not a
         # crash and not a corrupted field boundary.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
@@ -251,7 +251,7 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
 
     def test_a_nonzero_exit_yields_no_albums_regardless_of_stdout(self) -> None:
         # Covers Music.app not running, not scriptable, or automation permission
-        # denied -- osascript reports all three as a non-zero exit with a message
+        # denied: osascript reports all three as a non-zero exit with a message
         # on stderr, which this function never inspects: only the exit code gates.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
             return _completed(
@@ -305,10 +305,10 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
 
     def test_the_script_coerces_the_date_to_isot_not_a_locale_string(self) -> None:
         # Nothing else here pins the `«class isot»` coercion, so a regression to plain
-        # `as string` -- which is LOCALE-DEPENDENT ("Thursday, March 15, 2001 at
+        # `as string`, which is locale-dependent ("Thursday, March 15, 2001 at
         # 11:00:33 PM" on one machine, something else entirely on another) and would
-        # silently break the lexicographic newest-wins comparison on any host with a
-        # different locale -- would stay green here.
+        # silently fail the date-shape check for every row on any host with a
+        # different locale, would stay green here.
         seen: list[list[str]] = []
 
         def run(args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
@@ -320,7 +320,7 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
 
     def test_real_run_is_the_default_runner(self) -> None:
         # Pins the injection contract (mirrors cover_art.artwork_url's `fetch`
-        # default) without calling it -- `_real_run` itself is only exercised by
+        # default) without calling it: `_real_run` itself is only exercised by
         # the live smoke tests.
         kwdefaults = recently_added.newest_albums_from_music.__kwdefaults__
         assert kwdefaults is not None  # narrows for mypy; every kw-only param has one
@@ -330,8 +330,8 @@ class NewestAlbumsFromMusicTest(unittest.TestCase):
 #: The reference day every test below injects. Fixed, and deliberately far from any
 #: date these tests will ever run on: a row's distance from "today" is then a property
 #: of the test, and a call site that quietly read the real clock instead of the
-#: injected day would keep a row dated two days past this one -- twenty-odd years in
-#: its past -- and fail here, rather than agreeing with the injection by coincidence.
+#: injected day would keep a row dated two days past this one (twenty-odd years in
+#: its past) and fail here, rather than agreeing with the injection by coincidence.
 _TODAY = dt.date(2000, 6, 15)
 
 
@@ -350,7 +350,7 @@ class RowBoundaryTest(unittest.TestCase):
     The AppleScript joins each track's date, album artist and album with `tab` and
     ends the row with `linefeed`, with the tag text itself concatenated unescaped.
     A tag can therefore carry the row terminator, and whatever follows it in that
-    tag is read as a row of its own -- one whose every field, the date included,
+    tag is read as a row of its own, one whose every field, the date included,
     the tag's author chose.
     """
 
@@ -358,7 +358,7 @@ class RowBoundaryTest(unittest.TestCase):
         # An album tag holding a line break, then a date-artist-album triple dated
         # far in the future: read as a row, it ranked newest forever, ahead of every
         # real addition. The genuine newest row must win, and the forged row must be
-        # absent at any count -- not merely ranked lower.
+        # absent at any count, not merely ranked lower.
         run = _rows(
             "2000-06-01T10:00:00\tThe Invented Quartet\tPlaceholder Album",
             "2000-05-01T10:00:00\tArtist A\tAn Album\n"
@@ -372,11 +372,11 @@ class RowBoundaryTest(unittest.TestCase):
         self,
     ) -> None:
         # `fromisoformat` reads far more than the one shape `«class isot» as string`
-        # emits. A check that parses a row only to BOUND it, then ranks the RAW
+        # emits. A check that parses a row only to bound it, then ranks the raw
         # string, lets another shape pass the bound and sort wherever its characters
         # land: `'0'` and `'W'` both sort above `'-'`, and a separator other than `T`
         # leaves the digits in place. Each row below parses inside the future bound
-        # AND sorts above the genuine one, so each took the newest slot -- which is
+        # and sorts above the genuine one, so each took the newest slot. That is
         # the bypass the future-date fix alone does not close, its own test planting
         # only the `9999-` shape.
         for forged in (
@@ -407,10 +407,10 @@ class RowBoundaryTest(unittest.TestCase):
         self.assertEqual([ref.album for ref in refs], ["Placeholder Album"])
 
     def test_the_rank_is_keyed_on_the_parsed_date_not_the_raw_stamp(self) -> None:
-        # The shape check above makes the two keys agree -- every stamp it admits
-        # sorts as its own parsed value -- so nothing else here can tell them apart,
+        # The shape check above makes the two keys agree (every stamp it admits
+        # sorts as its own parsed value), so nothing else here can tell them apart,
         # and the parsed key would be deletable at full coverage. It is kept because
-        # it is what stops a LATER loosening of the shape from re-opening the bypass,
+        # it is what stops a later loosening of the shape from re-opening the bypass,
         # and that is the guarantee this test pins: with the shape check widened to
         # admit the basic form, a raw-string rank puts the forged row first again
         # while a parsed rank still refuses it the slot.
@@ -456,7 +456,7 @@ class RowBoundaryTest(unittest.TestCase):
 
     def test_a_row_carrying_a_nul_is_skipped_while_the_rest_are_kept(self) -> None:
         # No real tag carries a NUL, and a name that does cannot be handed to a
-        # subprocess at all -- the per-album counts query built from it would be
+        # subprocess at all: the per-album counts query built from it would be
         # refused before it ran. Skipping the row here keeps every other row.
         run = _rows(
             "2000-06-01T10:00:00\tArtist\x00A\tAn Album",

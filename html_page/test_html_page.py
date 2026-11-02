@@ -162,6 +162,20 @@ class PageTest(unittest.TestCase):
             )
         )
 
+    def test_no_generator_is_named_unless_asked(self) -> None:
+        self.assertNotIn('name="generator"', self.page)
+
+    def test_a_generator_is_named_in_the_head_escaped(self) -> None:
+        page = html_page.page(
+            title="T", header=(), main=(), read_only="R.", generator='a "b" <c>'
+        )
+        self.assertIn(
+            '<meta charset="utf-8">\n'
+            '<meta name="generator" content="a &quot;b&quot; &lt;c&gt;">\n',
+            page,
+        )
+        self.assertEqual(html_page.page_problems(page), [])
+
     def test_no_script_and_nothing_fetched(self) -> None:
         lowered = self.page.lower()
         for marker in ("<script", "http", "//", "url(", "@import", "<link"):
@@ -185,12 +199,29 @@ class ParsedPageTest(unittest.TestCase):
         )
         self.assertEqual(parsed.ids, ["x"])
         self.assertEqual(parsed.links, ["#x"])
-        self.assertEqual(parsed.sources, ["s"])
+        self.assertEqual(parsed.sources, ["src=s"])
         self.assertEqual(parsed.text, ["go", "t"])
         self.assertEqual(parsed.stack, [])
 
+    def test_it_records_handlers_styles_and_markup_apart_from_text(self) -> None:
+        parsed = html_page.ParsedPage(
+            '<p onclick="go()" style="x: y">AC//DC</p><!-- c --><style>s</style>'
+        )
+        self.assertEqual(parsed.handlers, ["p onclick"])
+        self.assertEqual(parsed.styles, ["x: y"])
+        self.assertEqual(
+            parsed.markup,
+            ['<p onclick="go()" style="x: y">', "<!-- c -->", "<style>", "s"],
+        )
+        self.assertEqual(parsed.text, ["AC//DC", "s"])
+
     def test_a_void_element_is_never_left_open(self) -> None:
         for tag in sorted(html_page.VOID_ELEMENTS):
+            with self.subTest(tag=tag):
+                self.assertEqual(html_page.ParsedPage(f"<p><{tag}></p>").stack, [])
+
+    def test_every_html_void_element_is_void(self) -> None:
+        for tag in ("area", "base", "col", "embed", "param", "source", "track"):
             with self.subTest(tag=tag):
                 self.assertEqual(html_page.ParsedPage(f"<p><{tag}></p>").stack, [])
 
@@ -204,6 +235,35 @@ class ParsedPageTest(unittest.TestCase):
     def test_a_stray_end_tag_raises(self) -> None:
         with self.assertRaisesRegex(ValueError, r"</p> closes \[\]"):
             html_page.ParsedPage("</p>")
+
+
+class CssUnescapedTest(unittest.TestCase):
+    """CSS text as a browser's CSS parser reads it, each escape decoded."""
+
+    def test_a_hex_escape_takes_up_to_six_digits_and_one_whitespace(self) -> None:
+        for text, decoded in (
+            ("u\\72l", "url"),
+            ("\\000075 rl", "url"),
+            ("\\75\trl", "url"),
+            ("\\0000751", "u1"),
+            ("\\75  r", "u r"),
+            ("\\72\r\nl", "rl"),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(html_page.css_unescaped(text), decoded)
+
+    def test_a_backslash_before_any_other_character_is_that_character(self) -> None:
+        self.assertEqual(html_page.css_unescaped("\\u\\r\\l\\(\\\\"), "url(\\")
+
+    def test_an_out_of_range_escape_reads_as_the_replacement_character(self) -> None:
+        for escape in ("\\0 ", "\\110000 ", "\\d800 "):
+            with self.subTest(escape=escape):
+                self.assertEqual(html_page.css_unescaped(f"a{escape}b"), "a\ufffdb")
+
+    def test_text_without_a_backslash_comes_back_unchanged(self) -> None:
+        self.assertEqual(
+            html_page.css_unescaped("p { color: red; }"), "p { color: red; }"
+        )
 
 
 class PageProblemsTest(unittest.TestCase):
@@ -237,7 +297,7 @@ class PageProblemsTest(unittest.TestCase):
             html_page.page_problems('<a href="https://example.com/">x</a>'),
             [
                 "link not on the page: https://example.com/",
-                "fetches or runs: http",
+                "fetches or runs: https:",
                 "fetches or runs: //",
             ],
         )
@@ -245,7 +305,147 @@ class PageProblemsTest(unittest.TestCase):
     def test_a_source_is_named(self) -> None:
         self.assertEqual(
             html_page.page_problems('<img src="a.png">'),
-            ["source: a.png", "fetches or runs:  src="],
+            ["source: src=a.png", "fetches or runs:  src="],
+        )
+
+    def test_every_url_bearing_attribute_is_a_source(self) -> None:
+        for page, source in (
+            ('<img srcset="a.png 2x">', "srcset=a.png 2x"),
+            ('<video poster="p.png"></video>', "poster=p.png"),
+            ('<object data="d.svg"></object>', "data=d.svg"),
+            ('<body background="b.png"></body>', "background=b.png"),
+            ('<form action="f"></form>', "action=f"),
+            ('<button formaction="f"></button>', "formaction=f"),
+            ('<a ping="p">t</a>', "ping=p"),
+            ('<svg><image xlink:href="x.png"></image></svg>', "xlink:href=x.png"),
+            ('<html manifest="m.appcache"></html>', "manifest=m.appcache"),
+            ('<blockquote cite="c">q</blockquote>', "cite=c"),
+            ('<img longdesc="l">', "longdesc=l"),
+        ):
+            with self.subTest(source=source):
+                self.assertIn(f"source: {source}", html_page.page_problems(page))
+
+    def test_a_refresh_meta_element_is_a_source(self) -> None:
+        page = '<meta http-equiv="Refresh" content="0; url=elsewhere">'
+        self.assertEqual(
+            html_page.page_problems(page), ["source: content=0; url=elsewhere"]
+        )
+
+    def test_an_entity_encoded_marker_in_an_attribute_is_named(self) -> None:
+        for page, marker in (
+            ('<iframe srcdoc="&lt;script&gt;x"></iframe>', "<script"),
+            ('<iframe srcdoc="&lt;img s&#114;c=x&gt;"></iframe>', " src="),
+            ('<p title="&#104;ttps&#58;x">t</p>', "https:"),
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(
+                    f"fetches or runs: {marker}", html_page.page_problems(page)
+                )
+
+    def test_a_srcdoc_is_a_source_whatever_it_holds(self) -> None:
+        for page, source in (
+            (
+                '<iframe srcdoc="&lt;svg onload=alert(1)&gt;"></iframe>',
+                "srcdoc=<svg onload=alert(1)>",
+            ),
+            (
+                '<iframe srcdoc="&lt;img/src=x onerror=alert(1)&gt;"></iframe>',
+                "srcdoc=<img/src=x onerror=alert(1)>",
+            ),
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(html_page.page_problems(page), [f"source: {source}"])
+
+    def test_a_javascript_url_in_a_srcdoc_is_a_source_and_runs(self) -> None:
+        page = (
+            '<iframe srcdoc="&lt;a href=javascript:alert(1)&gt;c&lt;/a&gt;"></iframe>'
+        )
+        self.assertEqual(
+            html_page.page_problems(page),
+            [
+                "source: srcdoc=<a href=javascript:alert(1)>c</a>",
+                "fetches or runs: javascript:",
+            ],
+        )
+
+    def test_a_css_escaped_marker_is_named(self) -> None:
+        for page, marker in (
+            ("<style>p{background:u\\72l(x)}</style>", "url("),
+            ('<style>@\\69mport "x";</style>', "@import"),
+            ('<style>p{b:\\69mage-set("a" 1x)}</style>', "image-set("),
+            ("<style>p{b:\\000075 rl(x)}</style>", "url("),
+            ("<style>p{b:\\u\\r\\l(x)}</style>", "url("),
+            ("<style>p{b:u\\72\r\nl(x)}</style>", "url("),
+            ("<style>p{b:u\\72&#13;&#10;l(x)}</style>", "url("),
+            ('<p style="b:u\\72&#13;&#10;l(x)">t</p>', "url("),
+        ):
+            with self.subTest(page=page):
+                self.assertIn(
+                    f"fetches or runs: {marker}", html_page.page_problems(page)
+                )
+
+    def test_a_css_escaped_marker_in_a_style_attribute_is_named(self) -> None:
+        self.assertEqual(
+            html_page.page_problems('<p style="b:u\\72l(x)">t</p>'),
+            ["style attribute: b:u\\72l(x)", "fetches or runs: url("],
+        )
+
+    def test_a_character_reference_in_a_foreign_style_element_is_named(self) -> None:
+        page = '<svg><style>&#64;import "x";</style></svg>'
+        self.assertEqual(html_page.page_problems(page), ["fetches or runs: @import"])
+
+    def test_a_repeated_attribute_is_named(self) -> None:
+        for page, problem in (
+            ('<p title="a" TITLE="b">t</p>', "attribute repeated: p title"),
+            ('<p id="x" class="c" id="y">t</p>', "attribute repeated: p id"),
+        ):
+            with self.subTest(problem=problem):
+                self.assertEqual(html_page.page_problems(page), [problem])
+
+    def test_the_first_of_a_repeated_attribute_is_the_one_checked(self) -> None:
+        page = '<a href="javascript:x" href="#x">t</a><p id="x"></p>'
+        self.assertEqual(
+            html_page.page_problems(page),
+            [
+                "attribute repeated: a href",
+                "link not on the page: javascript:x",
+                "fetches or runs: javascript:",
+            ],
+        )
+
+    def test_a_css_image_set_is_named(self) -> None:
+        self.assertEqual(
+            html_page.page_problems('<style>p { b: image-set("a.png" 1x); }</style>'),
+            ["fetches or runs: image-set("],
+        )
+
+    def test_http_equiv_is_no_fetch_by_itself(self) -> None:
+        page = '<meta http-equiv="content-type" content="text/html; charset=utf-8">'
+        self.assertEqual(html_page.page_problems(page), [])
+
+    def test_an_event_handler_is_named(self) -> None:
+        for page, handler in (
+            ("<details open ontoggle=alert(1)>x</details>", "details ontoggle"),
+            ('<p onclick="x">t</p>', "p onclick"),
+            ('<a href="#a" id="a" ONMOUSEOVER="x">t</a>', "a onmouseover"),
+        ):
+            with self.subTest(handler=handler):
+                self.assertEqual(html_page.page_problems(page), [f"handler: {handler}"])
+
+    def test_a_style_attribute_is_named(self) -> None:
+        self.assertEqual(
+            html_page.page_problems('<p style="color: red">x</p>'),
+            ["style attribute: color: red"],
+        )
+
+    def test_escaped_text_that_reads_like_a_fetch_is_not_flagged(self) -> None:
+        page = "<p>AC//DC at http &lt;script&gt; url(x) @import &lt;link src=y</p>"
+        self.assertEqual(html_page.page_problems(page), [])
+
+    def test_a_marker_in_the_style_element_is_named(self) -> None:
+        self.assertEqual(
+            html_page.page_problems("<style>p { background: url(x); }</style>"),
+            ["fetches or runs: url("],
         )
 
     def test_each_fetching_marker_is_named_whatever_its_case(self) -> None:

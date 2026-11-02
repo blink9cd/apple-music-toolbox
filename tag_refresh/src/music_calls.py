@@ -4,7 +4,7 @@ One function per call, each taking an injected `Runner` (the shape of
 `recently_added.Runner`), so every unit test drives a fake and none can reach
 Music.app; `real_run` is the real seam, built on `bounded_run`.
 
-1. `is_running` asks `application "Music" is running`, which answers WITHOUT
+1. `is_running` asks `application "Music" is running`, which answers without
    launching the application. It is the only script that names Music outside a
    `tell` block, and the caller asks it before anything else, so Music is never
    launched.
@@ -45,7 +45,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-# The shared bounded-subprocess runner, at ONE fixed place: directly under the project
+# The shared bounded-subprocess runner, at one fixed place: directly under the project
 # root, which is this file's great-grandparent, since it sits in the tool's src/. See
 # bounded_run/bounded_run.md, "Importing it", and stdio_utf8/stdio_utf8.md for why this
 # is not a search upward.
@@ -57,7 +57,7 @@ import bounded_run
 # `Runner`. Injected so every branch is reachable with no real `osascript`.
 Runner = Callable[[list[str], float], "subprocess.CompletedProcess[str]"]
 
-# How long AppleScript waits for the reply to EACH Apple event the script sends, set
+# How long AppleScript waits for the reply to each Apple event the script sends, set
 # by `with timeout of`. On expiry the script gets error -1712 and stops, while Music
 # goes on with the request: the bound turns one slow event into a typed failure
 # instead of a kill, and it does not stop Music. The slowest call worth making was
@@ -67,7 +67,7 @@ Runner = Callable[[list[str], float], "subprocess.CompletedProcess[str]"]
 # answer in 120 s, and the default AppleScript bound is two minutes.
 IN_SCRIPT_TIMEOUT_SECONDS = 30
 
-# The client-side kill, through `bounded_run`, which bounds the WHOLE call: the
+# The client-side kill, through `bounded_run`, which bounds the whole call: the
 # in-script bound is per event, and a lookup sends several events per track, so many
 # events each under it can still add up past it. Five seconds past the in-script
 # bound, so a single slow event's -1712 normally arrives first. Killing the client
@@ -130,7 +130,7 @@ end run"""
 # 21,000 file tracks, where a lookup by location or persistent ID scans the library;
 # each name is bound to a local first, so the filter compares against text rather
 # than an argv reference.
-# Each track's `location` is read into a local BEFORE `POSIX path of`: inside this
+# Each track's `location` is read into a local before `POSIX path of`: inside this
 # `tell`, `POSIX path of (location of t)` is sent to Music as part of the object
 # specifier and Music answered -1728 for every track, where `POSIX path of` a local
 # is a coercion of the alias done in the script (verified live, 2026-10-19: no rows
@@ -194,13 +194,13 @@ end run"""
 # `tracks i thru j`, never `file tracks i thru j`, which Music filters from the start of
 # the library on every event (about 5 s a read near the end of 20,000 tracks; why, and
 # what else was measured: library_audit.md, "Why plain track ranges"). Each property is
-# read for the whole range in ONE event (twelve a batch, whatever its size). Only a file
+# read for the whole range in one event (twelve a batch, whatever its size). Only a file
 # track has a `location`: with any other class in the range, it is read one file track at
 # a time in a `try` that re-raises Music's -1712, so a timeout never reads as "no file".
-# Class and cloud status become text INSIDE the `tell`, where Music's terminology names
+# Class and cloud status become text inside the `tell`, where Music's terminology names
 # them. The lists come from separate events, so a library changing between them could
 # pair one track's path with another's ID: every list's length is checked against the
-# first's, and a mismatch errors (a `CallFailed`). The rows are built AFTER the `tell`,
+# first's, and a mismatch errors (a `CallFailed`). The rows are built after the `tell`,
 # from locals alone, so no step can become an Apple event (`POSIX path of` a local, as in
 # LOOKUP_SCRIPT), and joined once; the fields are `list_tracks`'s. `flatText` turns each
 # tab and line break in a name into a space, so no name can split or forge a row; a path

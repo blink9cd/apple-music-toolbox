@@ -7,7 +7,7 @@ own environment, or any Python 3.12 or later: the floor is `requires-python` in 
 `pyproject.toml`, and a stock Mac's `python3` is older.
 
 `library/` holds two invented albums, one of them in two disc folders. Every `.mp3` in it is
-a **zero-byte placeholder**, not audio: the tool stats each file and reads its album tag,
+a zero-byte placeholder, not audio: the tool stats each file and reads its album tag,
 and a placeholder stats like any file and has no tag, so its tag reads as none. The albums
 are invented, so Music.app holds none of them, and every file is reported `not in Music`.
 Because zero bytes cannot carry metadata, the folder is exempt from the PII scan's

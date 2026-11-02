@@ -359,6 +359,17 @@ class FormatAndReportTest(af.AuditCase):
         self.assertIn("--decode", result.stdout)
         self.assertIn("afconvert", result.stdout)
 
+    def test_help_hides_the_off_switch_default(self) -> None:
+        # No one types False: --decode's help says what giving it does instead.
+        # Joined, because argparse wraps this annotation across two lines.
+        text = " ".join(la.build_parser().format_help().split())
+        self.assertNotIn("default: False", text)
+
+    def test_decode_is_falsy_omitted_and_true_given(self) -> None:
+        parser = la.build_parser()
+        self.assertFalse(parser.parse_args(["--library", "lib"]).decode)
+        self.assertIs(parser.parse_args(["--library", "lib", "--decode"]).decode, True)
+
 
 class RealWiringTest(unittest.TestCase):
     """The real wiring binds the real seams; nothing here calls one."""

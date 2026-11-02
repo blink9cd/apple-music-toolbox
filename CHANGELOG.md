@@ -1,0 +1,59 @@
+# Changelog
+
+Notable changes to this project, newest first.
+
+## 0.2.0 - 2026-11-02
+
+### Changed
+
+- `album_stats/tests/test_live_star_rating.py` no longer launches Music.app. It asks
+  `application "Music" is running`, which names Music outside any `tell` block, and runs
+  its one read-only query only when the answer is `true`; otherwise it skips. Before, it
+  checked with a `tell` block, which starts Music.app when it is not running. New tests
+  with a fake `run` seam pin the check, and they run offline too.
+
+### Added
+
+- `help_formatter` gains `RawNoneHidingFormatter` and `UnsetHidingFormatter`, which hide
+  a default of `None` (and, for the second, an empty list) in `--help`, since no one could
+  type either value.
+
+### Fixed
+
+- `--help` no longer prints a default no one could type: `album_stats` drops
+  `(default: None)` for `--favorite-min-stars`, and `tag_refresh` (`--whole-library`,
+  `--dry-run`) and `library_audit` (`--decode`) drop `(default: False)` for their
+  switches. An omitted switch now parses as `None` rather than `False`, so code that
+  calls `build_parser()` should test it for truth, not compare it with `False`.
+- `bounded_run`: a `ps` snapshot that overruns its bound is killed, given one second to be
+  reaped, then abandoned, instead of being waited on with no bound. Under heavy load macOS
+  `ps -A` can sit for minutes where `SIGKILL` cannot end it.
+- `html_page`'s page check, which the tools' tests run on every page they write, now
+  reports every URL-bearing attribute and any `srcdoc`, matches a scheme with its colon
+  (`javascript:` included), matches attribute values with their character references
+  decoded and CSS with its escapes decoded, knows every void element, and reports an
+  attribute given twice. It reads the page's markup only, so a name that looks like a URL
+  is no longer a problem.
+- `library_audit/tests/test_audit_live.py` and `phone_audit/tests/test_phone_live.py`
+  load their own file a second time to check its skip markers, and now register that copy
+  in `sys.modules` while it loads. A dataclass in the file looks itself up there as its
+  body runs, so before, that second load failed instead of returning the markers.
+- `stdio_utf8.spell_unsafe` also escapes U+061C, the Arabic letter mark, a direction
+  mark like the others it escapes.
+
+### Documentation
+
+- The README gains an Install section with a virtual environment, since Homebrew and
+  Debian Python refuse a system-wide `pip install`; shows the offline switch before the
+  test loop; and says what `test_live_star_rating.py` does.
+- Stale claims are corrected: `recently_added` ranks by the parsed date, not the raw
+  string; `album_stats` finds its sibling folders from its own location; and the README
+  no longer calls `recently_added` what the whole project turns on.
+- The prose in the docs, comments, and `--help` is rewritten without dashes and without
+  capitals or bold used for emphasis, and the shared libraries' docs are rewritten for a
+  reader outside the tree they came from.
+- `pyproject.toml` keeps only the tables a shipped tool or test reads.
+
+## 0.1.0 - 2026-10-27
+
+- Initial release.

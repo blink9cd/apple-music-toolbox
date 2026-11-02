@@ -2,13 +2,13 @@
 
 The default favorites signal is Music.app's `favorited`; a caller may instead ask for
 tracks the listener rated at least N stars. Music.app stores a rating as 0-100, twenty
-per star, so N stars is `rating >= N*20`, and only a USER rating counts: Music can
+per star, so N stars is `rating >= N*20`, and only a user rating counts: Music can
 derive a track rating from an album rating (see album_stats.md, "Why `favorited`, and
 not `rating`").
 
-Every test here drives a FAKE `run` -- nothing spawns `osascript` or touches Music.app.
+Every test here drives a fake `run`: nothing spawns `osascript` or touches Music.app.
 The rating script meets the real Music.app only in `tests/test_live_star_rating.py`,
-run by hand against a real library. These tests pin its TEXT, and
+run by hand against a real library. These tests pin its text, and
 that it stays the favorited script's structure line for line, because the
 dictionary-collision trap (`-10003 Access not allowed`) is invisible to any faked test.
 
@@ -97,7 +97,7 @@ class RatingQueryShapeTest(unittest.TestCase):
         )
 
     def test_neither_script_uses_the_removed_loved_property(self) -> None:
-        # `loved` was RENAMED to `favorited`; a script using it fails outright with
+        # `loved` was renamed to `favorited`; a script using it fails outright with
         # "The variable loved is not defined. (-2753)".
         for min_stars in (None, 1, 5):
             with self.subTest(min_stars=min_stars):
@@ -188,7 +188,7 @@ class StarRatingCommandLineTest(unittest.TestCase):
         self.assertIn("favorited is true", scripts[0])
 
     def test_a_star_count_outside_one_to_five_is_a_usage_error(self) -> None:
-        # Refused at parse time, exit 2, with the seam never reached -- the same
+        # Refused at parse time, exit 2, with the seam never reached: the same
         # treatment `--timeout` gives a value that cannot bound a query.
         for value in ("0", "6", "x", "2.5"):
             with self.subTest(stars=value):
@@ -207,6 +207,11 @@ class StarRatingCommandLineTest(unittest.TestCase):
 
     def test_help_names_the_option(self) -> None:
         self.assertIn("--favorite-min-stars", album_stats.build_parser().format_help())
+
+    def test_help_shows_no_default_for_the_unset_option(self) -> None:
+        # Its unset default is None, which no one could type: the help says what
+        # leaving it out means, as every sibling CLI's does, not "(default: None)".
+        self.assertNotIn("default: None", album_stats.build_parser().format_help())
 
 
 if __name__ == "__main__":

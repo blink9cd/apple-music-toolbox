@@ -23,7 +23,7 @@ row with no file*).
   `afcclient`. The tool has been proven on macOS only, though it makes no platform check
   of its own. It looks `afcclient` up on `PATH`; when it is missing a run exits `2` with
   one line naming the install.
-- **The iPhone connected by USB, trusted by this Mac and unlocked.** The pairing a Finder
+- **The iPhone connected by USB, trusted by this Mac, and unlocked.** The pairing a Finder
   sync already uses is enough: no sudo, no extra permission, no developer mode. Whether the
   phone can be read while locked is unknown, so unlock it. With no device, a lockdown
   refusal or a call that does not answer in time, a run exits `2` with one line saying to
@@ -36,7 +36,7 @@ row with no file*).
 
 Homebrew pins libimobiledevice by formula, not by a lockfile, so the installed `afcclient`
 can change under the tool. Every output format it parses was read from the source of
-`afcclient` **1.4.0**, and each run asks `afcclient -v` first. Another version, or one that
+`afcclient` 1.4.0, and each run asks `afcclient -v` first. Another version, or one that
 cannot be read, prints one warning line on stderr and the run goes on: a changed format
 then shows as unparsed listing lines or a refused database, never as a silent miss.
 
@@ -133,7 +133,7 @@ A row and a file match on (sync folder, file name), compared exactly. In each sy
 only plain files count; anything else listed there is counted as `other entries`. A listing
 line not in `afcclient`'s layout is counted as an unparsed line, said on stderr, and is a
 finding: it is never dropped. That includes the line `afcclient` prints for an entry
-whose stat failed: every field zeroed, a link count of `0`, a size of `0` and the epoch in
+whose stat failed: every field zeroed, a link count of `0`, a size of `0`, and the epoch in
 the local zone. It is counted as unparsed, never read as a file of 0 bytes.
 
 ## The report
@@ -150,7 +150,7 @@ files with no row: 1
 summary: findings 2; rows in the sync 3, files 3; outside the sync 1, unparsed lines 0, sizes unknown 0, other entries 0
 ```
 
-- **Rows with no file on the phone**, a finding: artist, album, disc, track number and
+- **Rows with no file on the phone**, a finding: artist, album, disc, track number, and
   title from the phone's own database, then where the file should be.
 - **Size differs**, a finding: the file is there, at another size than the database's. A
   row whose expected size is zero or missing is not judged, and is counted as
@@ -183,19 +183,19 @@ name: `--report phone.html` with the default format writes text. The `--report` 
 and the user-only, replaced-whole write are the same as for any format.
 
 The page is rendered from the very object the JSON format serializes, so the two never
-disagree. Its frame (the style, light and dark, the tables and the summary) is the
+disagree. Its frame (the style, light and dark, the tables, and the summary) is the
 shared `html_page` library in `html_page/` at the project root (`html_page.md` there),
 found at one fixed place on `sys.path`, so this page and `library_audit`'s look alike. It is one self-contained HTML5
 document: inline CSS, no script, and nothing a browser would fetch. It holds:
 
 - a header: that the phone was read, and when, to the minute in this Mac's local time;
 - a summary table of the three sections with their counts, each linked to its section;
-- one section per check, in the text report's order, each with its heading, its count and
+- one section per check, in the text report's order, each with its heading, its count, and
   one sentence under it, then a table. A section that found nothing keeps its heading,
-  count `0` and sentence, with no table.
-  - **Tracks with no file on the phone**: Artist, Album, Disc, Track, Title and Phone file
+  count `0`, and sentence, with no table.
+  - **Tracks with no file on the phone**: Artist, Album, Disc, Track, Title, and Phone file
     (the sync folder, then the file's name in it). One table sorted by artist, album,
-    disc and track; an album's artist and album appear on its first row only, and its
+    disc, and track; an album's artist and album appear on its first row only, and its
     other rows sit beneath it with those cells blank and no rule between them (an
     empty name on the first row reads as a dash, so it never looks like one of those),
     so each album stands out when choosing which to trial a repair on. Its sentence keeps the
@@ -203,7 +203,7 @@ document: inline CSS, no script, and nothing a browser would fetch. It holds:
   - **Size differs**: the same columns, then Phone size and Database size.
   - **Files with no row**: Phone file and Size; listed only, not a finding.
 - the summary figures: findings, rows in the sync, files, outside the sync, unparsed
-  lines, sizes unknown and other entries;
+  lines, sizes unknown, and other entries;
 - a footer: nothing on the phone was changed.
 
 Every name is escaped, and shown with each control character as a visible `\xNN`, as in
@@ -237,15 +237,15 @@ reasons repairs the same way, but only the rows whose tags it actually changed.
 **Not needed.** Two other routes are untried: unchecking the tracks with Finder's "Sync
 only checked songs and videos", syncing, and checking them again; and deleting them on the
 phone under Settings > General > iPhone Storage > Music. Removing the tracks from Music.app and adding them again would also work, but it loses
-play counts, dates and playlist membership.
+play counts, dates, and playlist membership.
 
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Nothing found. Files with no row, outside-the-sync rows, unknown sizes and other entries are tallies, not findings. |
+| `0` | Nothing found. Files with no row, outside-the-sync rows, unknown sizes, and other entries are tallies, not findings. |
 | `1` | Findings: a row with no file, a size that differs, or an unparsed listing line. |
-| `2` | Could not run: `afcclient` not on `PATH`, the phone not connected, unlocked or trusted, or unplugged mid-run, a call that timed out, a local file (the private temporary folder or a copy) that could not be used, a phone with no music database, a database that changed while it was copied, failed its integrity check or lacks the expected tables, a listing that failed, bad options (`--format html` without `--report` among them), a `--report` inside a git working tree or in a folder that does not exist, or a report that could not be written. |
+| `2` | Could not run: `afcclient` not on `PATH`, the phone not connected, unlocked, or trusted, or unplugged mid-run, a call that timed out, a local file (the private temporary folder or a copy) that could not be used, a phone with no music database, a database that changed while it was copied, failed its integrity check, or lacks the expected tables, a listing that failed, bad options (`--format html` without `--report` among them), a `--report` inside a git working tree or in a folder that does not exist, or a report that could not be written. |
 | `130` | Ctrl-C: before the report, nothing is printed or written and the copies are removed; while it is delivered, a `--report` file is left as it was and printed text may stop part way. |
 
 ## Tests
@@ -263,7 +263,7 @@ cannot find a real `afcclient` even if the fake went missing.
 **The live smoke test** (`tests/test_phone_live.py`) runs the real tool once against the
 connected phone with `--format json` into a temporary `--report`, and checks only that it
 exits `0` or `1` and that the JSON parses with the expected keys. It is skipped unless
-`PHONE_AUDIT_LIVE=1`, because it needs the operator at a connected, trusted and unlocked
+`PHONE_AUDIT_LIVE=1`, because it needs the operator at a connected, trusted, and unlocked
 phone, and it skips whenever `APPLE_MUSIC_TOOLBOX_OFFLINE` is set and off macOS, whatever
 `PHONE_AUDIT_LIVE` says. It reads only, through the same seam as every run.
 

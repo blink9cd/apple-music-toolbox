@@ -1,10 +1,11 @@
 """Report one album's track count, favorited-track count and year, via Apple Music.
 
-Answers a single question -- "of this album's N tracks, how many have I favorited?" --
-for a caller that already knows which album it means. `album_scan.py` is that caller;
+Answers a single question ("of this album's N tracks, how many have I favorited?")
+for a caller that already knows which album it means. `album_scan.py`, in the separate
+media_feeds project, is that caller;
 this tool has no idea how an album was chosen, and deliberately no ability to choose one.
 
-NOTHING HERE READS OR REPORTS A TRACK TITLE. Music.app is asked for three integers and
+Nothing here reads or reports a track title. Music.app is asked for three integers and
 returns three integers; there is no path by which a title, a filename or any other piece
 of library content reaches stdout, stderr or a caller. See `album_stats.md`, "What
 leaves Music.app", for why that boundary is drawn at the query rather than at the output.
@@ -14,17 +15,17 @@ star-rating half, by `tests/test_star_rating.py`:
 
 - **`favorited`, not `rating`, by default.** On a real library, `rating kind is user
   and rating > 0` matched almost none of the tracks; `favorited is true` matched a
-  large share. Recent Music.app draws a STAR for "Favorite", so the control a listener
-  presses when they "star a song" writes `favorited` -- while the property literally
+  large share. Recent Music.app draws a star for "Favorite", so the control a listener
+  presses when they "star a song" writes `favorited`, while the property literally
   named for rating stays almost empty. A count keyed on `rating` would read 0 of N on
-  essentially every album. A caller whose library DOES carry star ratings asks for
-  them explicitly with `min_stars`, and then only a USER rating counts.
+  essentially every album. A caller whose library does carry star ratings asks for
+  them explicitly with `min_stars`, and then only a user rating counts.
 - **Both artist and album, never album alone.** Two albums can share a title across
   different artists, and compilations make it worse.
 
-The real-process seam is `recently_added._real_run`, REUSED rather than
+The real-process seam is `recently_added._real_run`, reused rather than
 reimplemented: it already carries the bounded-subprocess discipline (a plain
-`subprocess.run(capture_output=True, timeout=...)` reads as bounded and is not -- see
+`subprocess.run(capture_output=True, timeout=...)` reads as bounded and is not; see
 that function's own docstring), and a second copy would be a second thing to get right.
 """
 
@@ -39,8 +40,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 # The shared UTF-8 stdio policy and --help formatter libraries, and the sibling
-# recently_added TOOL folder: all three sit directly under the project root, which
-# is this file's grandparent, so each is ONE fixed candidate rather than a search up the
+# recently_added tool folder: all three sit directly under the project root, which
+# is this file's grandparent, so each is one fixed candidate rather than a search up the
 # ancestors. See stdio_utf8/stdio_utf8.md, "How this project's tools import it", for why
 # the search was bounded and what an unbounded one lets a stranger's folder do.
 sys.path += [
@@ -70,11 +71,11 @@ class AlbumFacts(NamedTuple):
     "12 of 10".
 
     `year` is the latest year tag among the tracks the query matched, or None when
-    none of them is tagged. It is the FILE'S TAG, not a release date: an album
+    none of them is tagged. It is the file's tag, not a release date: an album
     ripped from a remaster reports the reissue year, and nothing here can tell a
     wrong tag from a right one. album_scan uses it as the album's year anyway,
-    filling only an absent one from the store's release date -- see album_scan.md,
-    in the media_feeds project.
+    filling only an absent one from the store's release date (see album_scan.md,
+    in the media_feeds project).
     """
 
     tracks: int
@@ -90,7 +91,7 @@ class AlbumFacts(NamedTuple):
 # ordering trap: escaping quotes before backslashes re-escapes the escapes just added,
 # and the resulting literal quietly means something other than the name it came from.
 # `str.translate` visits each character exactly once and never revisits its own output,
-# so that ordering bug is not merely untested here -- it cannot be written.
+# so that ordering bug is not merely untested here: it cannot be written.
 # Newline and carriage return map to the `\n` and `\r` escapes, which denote the same
 # characters: a raw line break inside an AppleScript literal also compiles, to the
 # same string (measured with osascript), so these two only keep the generated script
@@ -112,7 +113,7 @@ def _applescript_literal(value: str) -> str:
     """`value` as an AppleScript string literal, quotes included.
 
     Every caller interpolates the result straight into script source, so the quoting
-    is this function's responsibility and not the caller's -- returning the bare
+    is this function's responsibility and not the caller's: returning the bare
     escaped text would invite exactly the un-quoted interpolation this exists to stop.
     """
     return '"' + value.translate(_APPLESCRIPT_ESCAPES) + '"'
@@ -121,7 +122,7 @@ def _applescript_literal(value: str) -> str:
 def _qualifier_clause(min_stars: int | None) -> str:
     """The `whose` condition a track must meet to count toward `favorited`.
 
-    `None` is Music.app's `favorited` flag. A star count is a USER rating at or above
+    `None` is Music.app's `favorited` flag. A star count is a user rating at or above
     that many stars: `rating kind is user` is not optional, because Music can derive a
     track rating from an album rating, and counting those would credit tracks the
     listener never rated (album_stats.md, "Why `favorited`, and not `rating`").
@@ -134,7 +135,7 @@ def _qualifier_clause(min_stars: int | None) -> str:
 def _validate_min_stars(min_stars: int | None) -> None:
     """Raise ValueError unless `min_stars` is None or an int star count from 1 to 5.
 
-    `type(...) is int` rather than isinstance: a bool IS an int to Python, and `True`
+    `type(...) is int` rather than isinstance: a bool is an int to Python, and `True`
     would otherwise slip through as one star.
     """
     if min_stars is None:
@@ -148,17 +149,17 @@ def _facts_script(artist: str, album: str, min_stars: int | None) -> str:
 
     Two `whose` clauses select and count the tracks: a `whose` clause is evaluated
     inside Music.app and answers immediately, while iterating tracks and reading a
-    property per track makes each access its own Apple Event -- a probe reading two
+    property per track makes each access its own Apple Event; a probe reading two
     properties per track timed out on a few thousand tracks.
 
-    The match predicate is built ONCE and used in both clauses, so the two counts
+    The match predicate is built once and used in both clauses, so the two counts
     cannot drift apart by an edit to one of them. `min_stars` changes only the second
     clause's qualifier (`_qualifier_clause`); every other line, and every variable
     name, is the same in both modes, so the rating script keeps the structure the
     live test proved for the favorited one.
 
     The year is the one per-track read, and it loops only over the tracks the first
-    clause already matched: one Apple Event per track on THIS album, never one per
+    clause already matched: one Apple Event per track on this album, never one per
     track in the library.
     """
     match = (
@@ -167,18 +168,18 @@ def _facts_script(artist: str, album: str, min_stars: int | None) -> str:
     )
     qualifier = _qualifier_clause(min_stars)
     # The track set is bound once and reused for the count and the year, so the year
-    # is read from tracks certainly part of THIS album rather than from a second,
+    # is read from tracks certainly part of this album rather than from a second,
     # independently-evaluated query that could drift from it.
     #
-    # The year kept is the LATEST tag among those tracks. An untagged track reports 0,
+    # The year kept is the latest tag among those tracks. An untagged track reports 0,
     # which never beats a real year, so one untagged track cannot blank the album's
     # year; 0 survives only when no track is tagged. Latest rather than earliest
     # because a compilation's tracks can carry their original years, while the year a
-    # store lists for a compilation is its own release, on or after all of them --
+    # store lists for a compilation is its own release, on or after all of them,
     # and a store year is what `cover_art` weighs this one against.
     #
     # `albTracks`, not `matched`: `matched` is a term in Music's own dictionary and
-    # binding it fails at RUNTIME with "Access not allowed. (-10003)" -- which reads
+    # binding it fails at runtime with "Access not allowed. (-10003)", which reads
     # exactly like a denied automation permission and is not one. `computed` collides
     # the same way (see album_stats.md); the defense is to invent variable names
     # (`albTrk`, `trkYr`) rather than to reach for a natural-sounding word.
@@ -242,16 +243,16 @@ def album_facts(
     `favorited` field. Either way 0 means "asked, none qualified" and `None` means no
     answer, so the two never collapse.
 
-    Raises ValueError for a `min_stars` outside 1 to 5 -- a caller's programming
+    Raises ValueError for a `min_stars` outside 1 to 5, a caller's programming
     error, refused before any query. Otherwise never raises, mirroring
     `recently_added.newest_albums_from_music`'s contract for the same reason:
     Music.app absent, not running, not scriptable, automation permission denied, a
     timeout, a non-zero exit, an unparseable reply and an album that simply is not in
-    the library all come back as `None`, and the CALLER decides what no answer means
+    the library all come back as `None`, and the caller decides what no answer means
     rather than this function deciding for it via an exception.
     """
     # ValueError alongside the two obvious classes: `subprocess.Popen` raises it, not
-    # OSError, for an argv element holding a NUL -- and the artist and album are
+    # OSError, for an argv element holding a NUL, and the artist and album are
     # interpolated into the script that becomes one. A NUL in either would otherwise
     # escape this never-raises contract as a traceback out of the caller's refresh.
     _validate_min_stars(min_stars)
@@ -273,8 +274,8 @@ def positive_float(text: str) -> float:
     """A --timeout value: a finite number of seconds greater than zero.
 
     Raised as an ArgumentTypeError rather than checked in main, so argparse renders
-    the usage message and exits 2 -- the same treatment a non-numeric value already
-    gets, rather than a second spelling of "bad argument" -- and the rejection lands
+    the usage message and exits 2 (the same treatment a non-numeric value already
+    gets, rather than a second spelling of "bad argument"), and the rejection lands
     before any Music.app query. The floor exists because `bounded_run` expires a zero
     or negative timeout instantly, which surfaced as "no counts ... Music.app could
     not answer" on exit 1: a usage error disguised as a data answer. `nan` and `inf`
@@ -309,24 +310,25 @@ def star_count(text: str) -> int:
     return value
 
 
-class _HelpFormatter(
-    help_formatter.ReqAwareDefaultsFormatter, argparse.RawDescriptionHelpFormatter
-):
-    """Show every default AND keep the epilog's own line breaks.
+class _HelpFormatter(help_formatter.RawNoneHidingFormatter):
+    """Show every real default and keep the epilog's own line breaks.
 
     Neither stock formatter does both, and using the defaults formatter alone silently
     re-wraps the epilog into one unbroken block: its paragraph breaks vanish and even a
     short heading like "Exit codes:" can be split across a line.
 
-    The two bases override different methods -- `_get_help_string` for the defaults,
-    `_fill_text` for the wrapping -- so they compose with no conflict to resolve.
-    Because `_fill_text` no longer wraps, the epilog below is hard-wrapped by hand.
+    The shared `help_formatter.RawNoneHidingFormatter` composes the two halves: its
+    defaults half overrides `_get_help_string`, and `argparse.RawDescriptionHelpFormatter`
+    overrides `_fill_text` for the wrapping. Because `_fill_text` no longer wraps, the
+    epilog below is hard-wrapped by hand.
 
-    The defaults half is the SHARED `help_formatter.ReqAwareDefaultsFormatter`, not
+    The defaults half is the shared `help_formatter.ReqAwareDefaultsFormatter`, not
     argparse's stock one, and here it changes what an operator actually reads: below
     CPython 3.13 the stock formatter stamps a misleading "(default: None)" onto a
-    REQUIRED option, and BOTH `--artist` and `--album` are required. This project's
+    required option, and both `--artist` and `--album` are required. This project's
     floor is 3.12 (`pyproject.toml`'s `[project].requires-python`), below that fix.
+    A `None` default is hidden as well, since no one could type it: the help of
+    `--favorite-min-stars` says instead what leaving it out means.
     """
 
 
@@ -341,19 +343,19 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Prerequisites:\n"
             "  Music.app installed, running, and scriptable (macOS only; System\n"
-            "  Settings > Privacy & Security > Automation must allow it). Makes NO\n"
-            "  network call -- the Music.app query is a local subprocess. Run by\n"
+            "  Settings > Privacy & Security > Automation must allow it). Makes no\n"
+            "  network call: the Music.app query is a local subprocess. Run by\n"
             "  hand, or call album_facts() directly; never as a build step and\n"
             "  never at page-view time.\n"
             "\n"
             "Matching:\n"
-            "  --artist must match the album ARTIST, which is not always the track\n"
+            "  --artist must match the album artist, which is not always the track\n"
             "  artist: on a compilation they differ. Matching on the album title\n"
             "  alone is not enough, because two albums can share a title.\n"
             "\n"
             "Favorites signal:\n"
             "  By default a track counts when Music.app has it favorited. With\n"
-            "  --favorite-min-stars N it counts instead when the listener's OWN\n"
+            "  --favorite-min-stars N it counts instead when the listener's own\n"
             "  rating is at least N stars (Music.app rating >= N*20); a rating\n"
             "  Music derived from an album rating never counts.\n"
             "\n"
@@ -365,7 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
             "\n"
             "Exit codes:\n"
             "  0  wrote the counts\n"
-            "  1  no counts -- the album is not in the library, or Music.app could\n"
+            "  1  no counts: the album is not in the library, or Music.app could\n"
             "     not answer (absent, not running, not scriptable, or automation\n"
             "     permission denied)"
         ),
@@ -420,7 +422,7 @@ def main(argv: list[str] | None = None, *, run: Runner = _real_run) -> int:
         min_stars=args.favorite_min_stars,
     )
     if facts is None:
-        # album_facts' `None` does not say WHICH failure happened, so the message
+        # album_facts' `None` does not say which failure happened, so the message
         # offers both explanations.
         print(
             f"album_stats: no counts for {args.artist} - {args.album} "
@@ -430,7 +432,7 @@ def main(argv: list[str] | None = None, *, run: Runner = _real_run) -> int:
         return _EXIT_NO_COUNTS
 
     # No stdout newline pinning, unlike album_scan's `emit_records`: that tool
-    # writes the same record to EITHER a file or stdout and keeps the two
+    # writes the same record to either a file or stdout and keeps the two
     # byte-identical, while this one has a single output path.
     sys.stdout.write(
         json.dumps(

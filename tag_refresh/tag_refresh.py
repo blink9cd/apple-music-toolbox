@@ -31,9 +31,9 @@ from typing import Any
 #: The private modules' folder, beside this file.
 SRC_DIR = Path(__file__).resolve().parent / "src"
 sys.path.insert(0, str(SRC_DIR))
-# The shared libraries, each at ONE fixed place: directly under the project root, which
-# is this file's grandparent. Deliberately not a search up the ancestors -- that would
-# also put any same-named folder ABOVE the checkout on sys.path, and whatever it holds
+# The shared libraries, each at one fixed place: directly under the project root, which
+# is this file's grandparent. Deliberately not a search up the ancestors: that would
+# also put any same-named folder above the checkout on sys.path, and whatever it holds
 # would be imported in place of the real module. A library that is absent fails loudly
 # at the import below rather than being silently skipped. See stdio_utf8/stdio_utf8.md,
 # "How this project's tools import it".
@@ -205,6 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--whole-library",
         action="store_true",
+        # None, not False, so the help shows no default: no one types False, and the
+        # help says what giving the switch does. Every reader tests it for truth.
+        default=None,
         help="Refresh every file track Music.app holds, in batches. Refused with any "
         "other source.",
     )
@@ -232,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
+        default=None,
         help="Do everything but refresh: count the batches, or look up and match the "
         "named files.",
     )
@@ -363,8 +367,9 @@ def _seams(wiring: Wiring) -> refresh_run.Seams:
 def _whole_library(args: argparse.Namespace, wiring: Wiring) -> int:
     """Refresh the whole library, print its report; return its exit code."""
     _require_music(wiring)
-    run = refresh_run.refresh_library(_seams(wiring), dry_run=args.dry_run)
-    print(refresh_report.format_library(run, dry_run=args.dry_run), end="")
+    dry_run = bool(args.dry_run)
+    run = refresh_run.refresh_library(_seams(wiring), dry_run=dry_run)
+    print(refresh_report.format_library(run, dry_run=dry_run), end="")
     return refresh_report.library_exit_code(run)
 
 
@@ -413,9 +418,10 @@ def _explicit(args: argparse.Namespace, wiring: Wiring) -> int:
     collected = _collect(args, wiring)
     _require_music(wiring)
     groups = refresh_core.group_albums(collected.mp3s, tag_reader=wiring.tag_reader)
-    run = refresh_run.refresh_albums(groups, _seams(wiring), dry_run=args.dry_run)
+    dry_run = bool(args.dry_run)
+    run = refresh_run.refresh_albums(groups, _seams(wiring), dry_run=dry_run)
     hint = NO_MUTAGEN_HINT if wiring.tag_reader is None else None
-    print(refresh_report.format_albums(run, dry_run=args.dry_run, hint=hint), end="")
+    print(refresh_report.format_albums(run, dry_run=dry_run, hint=hint), end="")
     code = refresh_report.albums_exit_code(run, problems=_counted(collected.problems))
     if args.missing_list is None:
         return code

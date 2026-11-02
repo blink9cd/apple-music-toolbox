@@ -1,7 +1,7 @@
 """Grouped suite: this project's sys.path bootstrap never reaches above its own root.
 
 Each tool puts this library, the other shared library and its sibling tool folders on
-``sys.path`` from ONE fixed place: directly under the project root, derived from the
+``sys.path`` from one fixed place: directly under the project root, derived from the
 tool's own ``__file__``. Nothing here searches the ancestors, so no folder above a
 checkout can be imported in place of the real one. ``stdio_utf8.md``, "How this
 project's tools import it", says why.
@@ -73,12 +73,12 @@ class TestBootstrapStaysInsideTheProject(unittest.TestCase):
         """Plant a folder the old search would have taken, holding a shadowing module.
 
         ``bounded_run/bounded_run.py`` is what makes an ancestor search take the folder,
-        and it is deliberately EMPTY: the real library sits nearer, so it still wins its
+        and it is deliberately empty: the real library sits nearer, so it still wins its
         own name. The decoy is ``ctypes.py``, which the real ``bounded_run`` imports at
-        its top level -- after the bootstrap has put this folder on sys.path, and before
+        its top level, after the bootstrap has put this folder on sys.path and before
         anything else has imported ctypes. That is the actual hazard, and it is why
         "the tool imported the module it asked for" proves nothing: a stranger's folder
-        left on the path captures the NEXT import, ahead of the standard library.
+        left on the path captures the next import, ahead of the standard library.
         Returns the path the decoy creates when it runs.
         """
         marker = parent / "decoy-ran"
@@ -110,8 +110,8 @@ class TestBootstrapStaysInsideTheProject(unittest.TestCase):
     def _staged_copy(self, parent: Path) -> Path:
         """This project's tool folders copied to ``<parent>/project``, without caches.
 
-        A tool folder is one holding a module named after it -- the layout every
-        bootstrap relies on -- so nothing else at the root is copied on every run.
+        A tool folder is one holding a module named after it (the layout every
+        bootstrap relies on), so nothing else at the root is copied on every run.
         """
         project = parent / "project"
         for folder in _PROJECT_ROOT.iterdir():
@@ -134,7 +134,7 @@ class TestBootstrapStaysInsideTheProject(unittest.TestCase):
                 self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_the_decoy_fires_for_an_unbounded_search(self) -> None:
-        """The control: the walk these bootstraps replaced DOES run the decoy.
+        """The control: the walk these bootstraps replaced does run the decoy.
 
         Without it a clean result above could mean a dead decoy rather than a bounded
         search.

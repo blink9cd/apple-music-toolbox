@@ -243,6 +243,21 @@ class HelpTest(unittest.TestCase):
     def test_a_none_default_is_not_shown(self) -> None:
         self.assertNotIn("default: None", amr.build_parser().format_help())
 
+    def test_an_off_switch_default_is_not_shown(self) -> None:
+        # No one types False: a switch's help says what giving it does instead.
+        # Joined, because argparse may wrap the annotation across two lines.
+        text = " ".join(amr.build_parser().format_help().split())
+        self.assertNotIn("default: False", text)
+
+    def test_each_switch_is_falsy_omitted_and_true_given(self) -> None:
+        parser = amr.build_parser()
+        omitted = parser.parse_args(["--track", "a.mp3"])
+        given = parser.parse_args(["--whole-library", "--dry-run"])
+        for attr in ("whole_library", "dry_run"):
+            with self.subTest(attr=attr):
+                self.assertFalse(getattr(omitted, attr))
+                self.assertIs(getattr(given, attr), True)
+
 
 class WiringTest(unittest.TestCase):
     """The real wiring binds the real seams, and reading it makes no call."""

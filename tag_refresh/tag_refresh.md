@@ -1,6 +1,6 @@
 # tag_refresh.py
 
-Make Music.app reread the tags of MP3s whose tags changed on disk, so the lyrics, titles and
+Make Music.app reread the tags of MP3s whose tags changed on disk, so the lyrics, titles, and
 album names it shows are the files' own again. macOS only.
 
 ## Why it exists
@@ -67,13 +67,13 @@ line per batch on stderr. It looks nothing up. A track added to or removed from 
 during the run shifts the later indexes, so one track may be refreshed twice or missed once;
 the next run catches it.
 
-**Explicit mode** refreshes the MP3s that `--track`, `--album` and `--tracks-from` name.
+**Explicit mode** refreshes the MP3s that `--track`, `--album`, and `--tracks-from` name.
 The sources combine, and each file counts once, however many times and by whichever paths it
 is named: they are united by device and inode. The MP3s are grouped by their folder, and for
 each album folder the tool makes two calls:
 
 1. **Look up.** Every file track whose album is one of the folder's names (below), each
-   answered as its `id`, persistent ID and file path.
+   answered as its `id`, persistent ID, and file path.
 2. **Refresh by id.** Each matched track by direct `track id N`, refreshed only when its
    persistent ID is still the one the lookup answered; a track whose ID changed, or that is
    gone, is counted `stale` and never refreshed blind.
@@ -88,7 +88,7 @@ which is not an error: it may simply not be in the library.
 `--tracks-from` reads, and the lyrics tools' `--changed-list` writes, this format. This doc
 owns it; theirs point here.
 
-- UTF-8, one **absolute** MP3 path per line, **each line ended by a linefeed** (`\n`).
+- UTF-8, one absolute MP3 path per line, each line ended by a linefeed (`\n`).
 - Blank lines are skipped.
 - A relative path, a path that is not a file or not an MP3, a line that is not UTF-8, a line
   holding a NUL, and a line ended by a carriage return (a list saved with CRLF endings) are
@@ -204,7 +204,7 @@ not in Music:
 total: refreshed 21, not in Music 1, stale 1, errors 1, stopped 0 (album folders 4, MP3s 24)
 ```
 
-A row is `refreshed N`, followed by `not in Music K`, `stale K` and `unparsed rows K` when
+A row is `refreshed N`, followed by `not in Music K`, `stale K`, and `unparsed rows K` when
 each is not zero; or `error: <reason>` for a failed call; or `not refreshed (stopped)` for a
 folder a timeout or Ctrl-C left; or `stopped (may be partly refreshed)` for the folder whose
 refresh call the timeout or Ctrl-C interrupted, since Music goes on working on an abandoned
@@ -225,7 +225,7 @@ split a row or drive the terminal.
 ## Tests
 
 `test_tag_refresh.py` runs every suite in `tests/`. None reaches Music.app, the real
-library, the network or anything outside a temporary directory: every call goes through a
+library, the network, or anything outside a temporary directory: every call goes through a
 fake runner that plays `osascript` from an invented library and records each argument list,
 so a suite asserts that the `is running` probe came first, that no name appears in any script
 body, and that a dry run made no refresh call.

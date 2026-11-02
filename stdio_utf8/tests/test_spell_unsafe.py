@@ -1,10 +1,10 @@
-"""Grouped suite: ``spell_unsafe`` -- a name a terminal would act on, made visible.
+"""Grouped suite: ``spell_unsafe``, a name a terminal would act on, made visible.
 
 A name or message the tool did not write can hold an escape sequence (a clipboard write,
 a hyperlink, a cursor move) that drives the terminal it is printed to, or a direction
 override that makes it read as another name. ``spell_unsafe`` prints each such character
 as a visible escape and leaves every other character as it is. Unlike ``printable``, it
-is about what a terminal DOES with a character, not whether UTF-8 can encode it.
+is about what a terminal *does* with a character, not whether UTF-8 can encode it.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import stdio_utf8  # noqa: E402 - import follows the sys.path bootstrap above
 
-# The determinism convention fuzz_gate.md documents, held in the profile so
-# ``fuzz_gate --explore`` can apply its own settings (see test_escaping.py).
+# A deterministic Hypothesis run, held in the profile so an exploring campaign runner
+# can apply its own settings (see test_escaping.py).
 settings.register_profile(
     "fuzz_gate_deterministic",
     derandomize=True,
@@ -34,6 +34,7 @@ settings.load_profile("fuzz_gate_deterministic")
 #: so the test is a second statement of the set and not the subject read back.
 _CONTROLS = (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0))
 _LAYOUT = (
+    0x061C,
     0x200E,
     0x200F,
     *range(0x202A, 0x202F),
@@ -78,7 +79,7 @@ class TestSpellUnsafe(unittest.TestCase):
                 self.assertEqual(stdio_utf8.spell_unsafe(f"a{raw}b"), f"a{shown}b")
 
     def test_each_direction_or_separator_mark_prints_as_four_hex_digits(self) -> None:
-        """Lowercase hex, as the copies this replaces print it."""
+        """Four lowercase hex digits, never an uppercase or a short form."""
         for code in _LAYOUT:
             with self.subTest(code=hex(code)):
                 shown = stdio_utf8.spell_unsafe(f"a{chr(code)}b")

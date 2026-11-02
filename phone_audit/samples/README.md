@@ -1,6 +1,6 @@
 # phone_audit samples
 
-A hand run of `phone_audit` against a **fake `afcclient`** serving a small invented phone, so
+A hand run of `phone_audit` against a fake `afcclient` serving a small invented phone, so
 it never reaches a real iPhone and prints the same report on every machine. It needs `bash`,
 `sqlite3` (macOS ships one), and a `python` that is the project's own environment, or any
 Python 3.12 or later: the floor is `requires-python` in the project's `pyproject.toml`, and a

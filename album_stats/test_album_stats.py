@@ -1,26 +1,26 @@
 """Tests for album_stats: one album's track and favorited-track counts and year.
 
-Every test that reaches the seam drives a FAKE `run` -- nothing in this file spawns a
+Every test that reaches the seam drives a fake `run`: nothing in this file spawns a
 real `osascript` process or touches Music.app. The real-process seam is
-`recently_added._real_run`, which this tool REUSES rather than reimplementing; this
-tool's favorited script meets the real Music.app in
-`album_scan/tests/test_live_favorites.py`, and its star-rating script in
+`recently_added._real_run`, which this tool reuses rather than reimplementing; this
+tool's favorited script meets the real Music.app in `test_live_favorites.py`, in
+the media_feeds project's `album_scan`, and its star-rating script in
 `tests/test_live_star_rating.py`.
 
 Two of these tests pin rules a plausible-looking rewrite would silently undo:
 `favorited`, not `rating`, is the property with data in it (measured against a real
-library; see `album_stats.md`), and both the artist AND the album must constrain
+library; see `album_stats.md`), and both the artist and the album must constrain
 the query.
 
 `load_tests` below also runs every suite in `tests/`. A runner that runs only each
 folder's top-level test file (the README's loop, or a gate that prunes `tests/` by
 name) reaches them only through this file, so without the hook those suites run
 nowhere there. One
-of them, `tests/test_live_literal.py`, does spawn the real `/usr/bin/osascript` -- on a
+of them, `tests/test_live_literal.py`, does spawn the real `/usr/bin/osascript`, on a
 bare string literal, with no `tell` block, so it reaches neither Music.app nor the
 network, and it skips itself off macOS. Another, `tests/test_live_star_rating.py`,
 sends one read-only query to the real Music.app, and skips itself off macOS, when
-Music.app is unreachable, and whenever `APPLE_MUSIC_TOOLBOX_OFFLINE` is set.
+Music.app is not running, and whenever `APPLE_MUSIC_TOOLBOX_OFFLINE` is set.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def _script_for(artist: str, album: str) -> str:
 
     Captures the argv the seam receives rather than calling the script builder
     directly, so these assertions cover the whole path from public argument to the
-    text that would actually reach `osascript` -- an escaping bug anywhere along it
+    text that would actually reach `osascript`: an escaping bug anywhere along it
     fails here.
     """
     captured: list[str] = []
@@ -99,7 +99,7 @@ class AlbumFactsTest(unittest.TestCase):
 
     def test_a_single_track_album_is_a_real_answer(self) -> None:
         # A single: one track, favorited. The floor is "no tracks matched", not "one
-        # track" -- the boundary an off-by-one rewrite of the guard would move, and
+        # track": the boundary an off-by-one rewrite of the guard would move, and
         # the one no other test here pins on purpose.
         counts = album_facts(
             artist="Fictionals",
@@ -109,7 +109,7 @@ class AlbumFactsTest(unittest.TestCase):
         self.assertEqual(counts, AlbumFacts(tracks=1, favorited=1, year=1994))
 
     def test_zero_favorited_is_a_real_answer_not_a_missing_one(self) -> None:
-        # The COMMON case for a newly added album: this must be a value, never None,
+        # The common case for a newly added album: this must be a value, never None,
         # or a consumer could not tell "none favorited yet" from "could not tell".
         counts = album_facts(
             artist="Fictionals", album="Blue", run=_runner_returning(0, "10\t0\t2001")
@@ -145,7 +145,7 @@ class AlbumFactsTest(unittest.TestCase):
     def test_a_refused_argv_is_no_answer(self) -> None:
         # A NUL in the artist or album lands in the script text, and
         # `subprocess.Popen` refuses an argv element holding one with ValueError
-        # rather than OSError -- the one seam failure this contract did not cover.
+        # rather than OSError, the one seam failure this contract did not cover.
         def run(_args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
             raise ValueError("embedded null byte")
 
@@ -258,7 +258,7 @@ class QueryShapeTest(unittest.TestCase):
         # Text, not behavior: no faked test can run AppleScript. The loop's semantics
         # were proven through the real parser on a tell-free copy, and only the live
         # test runs it against Music.app. What this pins is that every matched track
-        # is visited and the LARGER year is kept -- so an untagged track's 0 never
+        # is visited and the larger year is kept, so an untagged track's 0 never
         # wins, and flipping the comparison to keep the earliest fails here.
         lines = [
             line.strip() for line in _script_for("Fictionals", "Blue").splitlines()
@@ -268,7 +268,7 @@ class QueryShapeTest(unittest.TestCase):
         self.assertIn("if trkYr > yr then set yr to trkYr", lines)
 
     def test_no_script_variable_is_a_known_music_dictionary_term(self) -> None:
-        # Binding a variable named after a term in Music's dictionary fails at RUNTIME
+        # Binding a variable named after a term in Music's dictionary fails at runtime
         # as "Access not allowed. (-10003)", which reads like a denied automation
         # permission. Both known collisions passed every faked test and were caught
         # only live; this keeps them from coming back by a rename.
@@ -279,13 +279,13 @@ class QueryShapeTest(unittest.TestCase):
                 self.assertNotIn(name, _KNOWN_DICTIONARY_COLLISIONS)
 
     def test_the_query_does_not_use_the_removed_loved_property(self) -> None:
-        # `loved` was RENAMED to `favorited`; a script using it fails outright with
+        # `loved` was renamed to `favorited`; a script using it fails outright with
         # "The variable loved is not defined. (-2753)".
         self.assertNotIn("loved", _script_for("Fictionals", "Blue"))
 
     def test_a_double_quote_in_a_name_is_escaped(self) -> None:
         # Unescaped, this closes the AppleScript string literal early and the script
-        # fails to compile -- or worse, changes what is queried.
+        # fails to compile, or worse, changes what is queried.
         script = _script_for("Fictionals", 'The "Blue" Album')
         self.assertIn('album is "The \\"Blue\\" Album"', script)
 
@@ -302,8 +302,8 @@ class QueryShapeTest(unittest.TestCase):
         self.assertIn('album is "a\\\\\\"b"', script)
 
     def test_a_newline_in_a_name_is_escaped(self) -> None:
-        # The escape denotes the same character a raw newline would -- a raw one also
-        # compiles, to the same string (measured with osascript) -- so this pins only
+        # The escape denotes the same character a raw newline would (a raw one also
+        # compiles, to the same string, measured with osascript), so this pins only
         # that the generated script keeps each statement on one line.
         script = _script_for("X", "two\nlines")
         self.assertIn('album is "two\\nlines"', script)
@@ -396,9 +396,9 @@ class CommandLineTest(unittest.TestCase):
     def test_a_timeout_that_cannot_bound_a_query_is_a_usage_error(self) -> None:
         # `bounded_run` expires a zero or negative timeout instantly, so without a
         # floor `--timeout 0` reported "no counts ... Music.app could not answer" on
-        # exit 1 -- a usage error disguised as a data answer. A non-finite value is
+        # exit 1: a usage error disguised as a data answer. A non-finite value is
         # no bound at all. Each is refused at parse time, exit 2, with the seam never
-        # reached -- the same treatment a non-numeric value already gets.
+        # reached, the same treatment a non-numeric value already gets.
         for value in ("0", "-1", "nan", "inf"):
             with self.subTest(timeout=value):
                 run, seen = _recording_runner("10\t2\t1994")
@@ -416,7 +416,7 @@ class CommandLineTest(unittest.TestCase):
                 self.assertEqual(seen, [])
 
     def test_the_default_timeout_is_the_sibling_lookups_bound_not_a_copy(self) -> None:
-        # Both tools' `whose` clauses visit the whole library, so they share ONE
+        # Both tools' `whose` clauses visit the whole library, so they share one
         # bound. A restated 60.0 here agrees today and drifts on the next edit to
         # either side; pinned on the function default and the CLI's alike.
         shared = recently_added._MUSIC_TIMEOUT_SECONDS
@@ -432,14 +432,14 @@ class CommandLineTest(unittest.TestCase):
         self.assertIn("Exit codes:", text)
 
     def test_the_parser_builds_its_formatter_on_the_shared_one(self) -> None:
-        # Pinned as a BINDING, not a rendering: on 3.13 and later argparse already
+        # Pinned as a binding, not a rendering: on 3.13 and later argparse already
         # drops the bogus "(default: None)" from a required option, so a --help
         # assertion here would pass just as well with the shared base removed
         # ("The version trap" in help_formatter.md). The floor is 3.12,
-        # below that fix, and `--artist`/`--album` are both required -- so this tool
+        # below that fix, and `--artist`/`--album` are both required, so this tool
         # ships the shim or lies to every operator on a floor interpreter.
         #
-        # An INSTANCE check, not assertIs: the local formatter MIXES the shared base
+        # An instance check, not assertIs: the local formatter mixes the shared base
         # with RawDescriptionHelpFormatter, which is what keeps the epilog's own line
         # breaks (see _HelpFormatter's docstring), so the assertion is "built on", not
         # "is". Instantiated the way argparse itself does because `formatter_class` is
@@ -480,10 +480,10 @@ def _test_ids(suite: unittest.TestSuite) -> set[str]:
 
 
 class GroupedSuiteWiringTest(unittest.TestCase):
-    """This module's REAL test load carries every test `tests/` holds.
+    """This module's real test load carries every test `tests/` holds.
 
-    Built from `loadTestsFromModule` -- what a bare run and the gate's coverage run use,
-    and what honors `load_tests` -- so deleting the hook fails here rather than leaving
+    Built from `loadTestsFromModule` (what a bare run and a coverage run use, and
+    what honors `load_tests`), so deleting the hook fails here rather than leaving
     the grouped suites silently unrun. It compares against discovery rather than a fixed
     floor because an export's proof run deletes `tests/test_live_literal.py` first (it is
     `uncontainable` there), and a floor would fail on exactly that deliberate absence.

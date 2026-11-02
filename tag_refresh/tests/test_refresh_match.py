@@ -217,7 +217,7 @@ class MatchTracksTest(unittest.TestCase):
         self.assertEqual(matches.not_in_music, (named,))
 
     def test_a_forged_row_naming_the_real_path_attaches_its_pair(self) -> None:
-        # The realistic forgery: the forged path IS the named file's own path, so it
+        # The realistic forgery: the forged path is the named file's own path, so it
         # stats to the named key and its (id, persistent ID) pair is attached to that
         # MP3. Refreshing that pair rereads another track's tags, and nothing worse.
         named = _mp3("/L/A/01.mp3", 7, 70)

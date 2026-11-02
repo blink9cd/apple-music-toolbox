@@ -34,9 +34,9 @@ SRC_DIR = Path(__file__).resolve().parent / "src"
 #: sibling tool folder's ``src/``, one fixed place under the project root.
 SHARED_DIR = Path(__file__).resolve().parents[1] / "tag_refresh" / "src"
 sys.path[:0] = [str(SRC_DIR), str(SHARED_DIR)]
-# The shared libraries, each at ONE fixed place: directly under the project root, which
-# is this file's grandparent. Deliberately not a search up the ancestors -- that would
-# also put any same-named folder ABOVE the checkout on sys.path, and whatever it holds
+# The shared libraries, each at one fixed place: directly under the project root, which
+# is this file's grandparent. Deliberately not a search up the ancestors: that would
+# also put any same-named folder above the checkout on sys.path, and whatever it holds
 # would be imported in place of the real module. See stdio_utf8/stdio_utf8.md, "How this
 # project's tools import it".
 sys.path += [
