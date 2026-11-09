@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apple-music-toolbox"
-version = "0.2.0"
+version = "0.2.1"
 description = "Tools for Apple Music on macOS: what was added most recently, an album's favorites, making Music.app reread changed tags, and auditing a library folder and a synced iPhone for missing files"
 readme = "README.md"
 license = "AGPL-3.0-or-later"

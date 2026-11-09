@@ -175,6 +175,13 @@ explicit mode. A folder whose refresh call timed out is reported as
 some of its tracks; run it again to be sure. Any other failed call is local: that batch or album folder reports its error
 and the run goes on.
 
+**A timeout on the very first call, every run, is usually a locked session, not a dialog.**
+While the login session is locked, Music answers no Apple event at all, even `get player
+state`, and sits idle at no CPU, which looks from outside exactly like a hidden modal dialog.
+Seen once: every call timed out with -1712 for hours, and the first call after logging in and
+bringing Music forward answered at once. So a run needs a logged-in session; before hunting
+for a dialog, check whether the session is locked.
+
 ## The report
 
 The report goes to stdout; progress (one line per batch or album folder) and every skipped
