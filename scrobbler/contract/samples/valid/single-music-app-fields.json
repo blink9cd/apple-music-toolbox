@@ -1,0 +1,51 @@
+{
+  "listen_type": "single",
+  "payload": [
+    {
+      "listened_at": 1793003600,
+      "track_metadata": {
+        "artist_name": "Quartet of the Lowlands",
+        "track_name": "Second Movement: Slow Tide",
+        "release_name": "Estuary Variations",
+        "additional_info": {
+          "submission_client": "scrobbler",
+          "submission_client_version": "0.1.0",
+          "media_player": "Music",
+          "tracknumber": "2",
+          "duration_ms": 412000,
+          "duration_played": 398,
+          "ls_source": "local_file",
+          "ls_media_type": "music",
+          "ls_file_path": "/Volumes/Library/Music/Quartet of the Lowlands/Estuary Variations/02 Second Movement.m4a",
+          "ls_persistent_id": "1B2C3D4E5F607182",
+          "ls_play_id": "7c4d9e2f-1a3b-4c5d-8e6f-a0b1c2d3e4f5",
+          "ls_disc_number": 1,
+          "ls_genre": "Classical",
+          "ls_year": 2021,
+          "ls_composer": "Imaginary Composer",
+          "ls_track_count": 4,
+          "ls_disc_count": 1,
+          "ls_compilation": false,
+          "ls_bpm": 64,
+          "ls_grouping": "Estuary Cycle",
+          "ls_work": "Estuary Variations, Op. 7",
+          "ls_movement": "Slow Tide",
+          "ls_movement_number": 2,
+          "ls_movement_count": 4,
+          "ls_music_rating": 80,
+          "ls_music_favorited": true,
+          "ls_music_disliked": false,
+          "ls_music_album_favorited": false,
+          "ls_music_album_disliked": false,
+          "ls_kind": "AAC audio file",
+          "ls_bit_rate": 256,
+          "ls_sample_rate": 44100,
+          "ls_music_date_added": 1700000000,
+          "ls_music_played_count": 12,
+          "ls_music_skipped_count": 1,
+          "ls_music_played_date": 1790000000
+        }
+      }
+    }
+  ]
+}

@@ -11,3 +11,6 @@ htmlcov/
 # `pip install ".[test]"` builds in place, leaving these beside the sources.
 build/
 *.egg-info/
+# SwiftPM build output and its per-package state, beside the scrobbler's app package.
+.build/
+.swiftpm/

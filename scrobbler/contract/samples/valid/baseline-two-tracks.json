@@ -1,0 +1,24 @@
+{
+  "baseline_type": "play_counts",
+  "captured_at": 1793100000,
+  "submission_client": "play_count_baseline",
+  "submission_client_version": "0.1.0",
+  "tracks": [
+    {
+      "artist_name": "The Paper Lanterns",
+      "track_name": "Harbor Lights at Noon",
+      "release_name": "Saltwater Almanac",
+      "ls_file_path": "/Volumes/Library/Music/The Paper Lanterns/Saltwater Almanac/03 Harbor Lights at Noon.mp3",
+      "ls_persistent_id": "0A1B2C3D4E5F6071",
+      "duration_ms": 214000,
+      "play_count": 42,
+      "last_played_at": 1793000000
+    },
+    {
+      "artist_name": "Copper Finch",
+      "track_name": "Lowland Static",
+      "ls_catalog_id": "1700000001",
+      "play_count": 0
+    }
+  ]
+}

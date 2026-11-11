@@ -96,7 +96,8 @@ is empty), the album and the disc. A file's come from its tags; a Music.app trac
 listing's same three fields. Both sides are compared the same way: tab, linefeed, and
 carriage return turned into spaces (as the listing script does), Unicode composed (NFC),
 surrounding spaces stripped, and case folded, so `Invented Album` and `INVENTED ALBUM` (with a trailing space) are
-one album; Music.app's disc `0` (none) is disc 1, as a file's absent disc tag is. An album
+one album; Music.app's disc `0` (none) is disc 1, as a file's absent disc tag is, and a disc
+past four digits is disc 1 on both sides, as the tag read takes it (check 3). An album
 filed across several folders is therefore one album, and a lone single beside another album
 in one folder is its own. A file whose tags cannot be read falls back to its folder as its
 group, and so does every file when mutagen is absent; the report marks such a group

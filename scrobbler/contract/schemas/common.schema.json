@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://listensmith.invalid/contract/1/common.schema.json",
+  "title": "listensmith contract: shared definitions",
+  "$comment": "Pinned (ruling I2) to the ListenBrainz JSON documentation, https://listenbrainz.readthedocs.io/en/latest/users/json.html, and its submit-listens API page, https://listenbrainz.readthedocs.io/en/latest/users/api/core.html, as read on 2026-11-08. The pages carry no version marker, so the date is the pin. Change these definitions only on purpose, recording the new date.",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "text": { "type": "string", "minLength": 1 },
+    "listened_at": {
+      "$comment": "ListenBrainz's earliest listened_at, up to the last second of 9999-12-31 UTC, unix_seconds' ceiling (ruling L1).",
+      "type": "integer",
+      "minimum": 1033430400,
+      "maximum": 253402300799
+    },
+    "unix_seconds": {
+      "$comment": "A moment as Unix seconds, up to the last second of 9999-12-31 UTC.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799
+    },
+    "music_count": {
+      "$comment": "One of Music.app's own counts, up to the largest signed 32-bit integer.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "track_metadata": {
+      "type": "object",
+      "required": ["artist_name", "track_name", "additional_info"],
+      "properties": {
+        "artist_name": { "$ref": "#/$defs/text" },
+        "track_name": { "$ref": "#/$defs/text" },
+        "release_name": { "$ref": "#/$defs/text" },
+        "additional_info": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "listenbrainz_info": {
+      "$comment": "Every documented additional_info key. The patternProperties entry marks each key without the ls_ prefix as evaluated, so a record's unevaluatedProperties: false rejects only undefined ls_ keys (ruling S3).",
+      "type": "object",
+      "properties": {
+        "artist_mbids": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+        "release_group_mbid": { "$ref": "#/$defs/uuid" },
+        "release_mbid": { "$ref": "#/$defs/uuid" },
+        "recording_mbid": { "$ref": "#/$defs/uuid" },
+        "track_mbid": { "$ref": "#/$defs/uuid" },
+        "work_mbids": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+        "tracknumber": { "type": "string" },
+        "isrc": { "$ref": "#/$defs/text" },
+        "spotify_id": { "$ref": "#/$defs/text" },
+        "tags": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        },
+        "media_player": { "$ref": "#/$defs/text" },
+        "media_player_version": { "$ref": "#/$defs/text" },
+        "submission_client": { "$ref": "#/$defs/text" },
+        "submission_client_version": { "$ref": "#/$defs/text" },
+        "original_submission_client": { "$ref": "#/$defs/text" },
+        "music_service": { "$ref": "#/$defs/text" },
+        "music_service_name": { "$ref": "#/$defs/text" },
+        "origin_url": { "$ref": "#/$defs/text" },
+        "label": { "$ref": "#/$defs/text" },
+        "duration_ms": { "type": "integer", "minimum": 0, "maximum": 2073600000 },
+        "duration": { "type": "integer", "minimum": 0, "maximum": 2073600 },
+        "duration_played": {
+          "$comment": "Seconds heard, up to the track duration's 24-day ceiling (ruling L2).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2073600
+        },
+        "duration_played_ms": {
+          "$comment": "Milliseconds heard, up to the track duration's 24-day ceiling (ruling L2).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2073600000
+        },
+        "mbid_mapping": { "not": {} }
+      },
+      "patternProperties": { "^(?!ls_)": true },
+      "allOf": [
+        { "not": { "required": ["duration", "duration_ms"] } },
+        { "not": { "required": ["duration_played", "duration_played_ms"] } }
+      ]
+    },
+    "listensmith_track": {
+      "$comment": "The ls_ keys every record may carry: identity (D2), source (A8, S2), media type (C7), the play ID (A5, H2), and the Music.app fields read when a play starts (F1 to F4).",
+      "type": "object",
+      "properties": {
+        "ls_source": {
+          "description": "Where the audio came from (rulings A8 and S2); not the submitting client, which is submission_client. local_file requires ls_file_path, catalog requires ls_catalog_id.",
+          "enum": ["local_file", "catalog", "radio"]
+        },
+        "ls_media_type": {
+          "description": "The kind of audio (ruling C7); a record without it reads as music.",
+          "enum": ["music", "podcast", "audiobook", "other"]
+        },
+        "ls_file_path": {
+          "description": "The audio file's path on the machine that played it (ruling D2); required when ls_source is local_file.",
+          "$ref": "#/$defs/text"
+        },
+        "ls_persistent_id": {
+          "description": "The player's own persistent ID for the track (ruling D2).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_catalog_id": {
+          "description": "The streaming catalog's ID for the track, in place of a path (ruling A8); required when ls_source is catalog.",
+          "$ref": "#/$defs/text"
+        },
+        "ls_play_id": {
+          "description": "A unique ID for one play, shared by every piece of that play (rulings A5 and H2). Lowercase only: the scrobbler lowercases its UUID (Swift writes uppercase), so the repeat key compares equal for the same play.",
+          "$ref": "#/$defs/uuid"
+        },
+        "ls_album_artist": {
+          "description": "The album artist tag, when it differs from the track artist (ruling D2).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_disc_number": {
+          "description": "The disc number within a multi-disc release (ruling D2), up to 999 like ls_disc_count (ruling L4).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "ls_genre": {
+          "description": "The genre tag as the player holds it (ruling D2).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_year": {
+          "description": "The release year tag (ruling D2).",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 9999
+        },
+        "ls_composer": {
+          "description": "The composer tag (ruling F1).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_track_count": {
+          "description": "How many tracks the disc holds (ruling F1).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9999
+        },
+        "ls_disc_count": {
+          "description": "How many discs the release holds (ruling F1).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "ls_compilation": {
+          "description": "Whether the track is part of a compilation (ruling F1).",
+          "type": "boolean"
+        },
+        "ls_bpm": {
+          "description": "The beats-per-minute tag (ruling F1). Music.app holds 0 for none, and the adapter then omits the key, so 0 is refused.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "ls_grouping": {
+          "description": "The grouping tag (ruling F1).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_work": {
+          "description": "The classical work the track belongs to (ruling F1).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_movement": {
+          "description": "The movement's name within its work (ruling F1).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_movement_number": {
+          "description": "The movement's number within its work (ruling F1).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "ls_movement_count": {
+          "description": "How many movements the work has (ruling F1).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "ls_music_rating": {
+          "description": "Music.app's own rating of the track, 20 per star (ruling F2). Read when the play starts, so it is the opinion held when the play began.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "ls_music_favorited": {
+          "description": "Whether Music.app holds the track as a favorite (ruling F2). Read when the play starts, so it is the opinion held when the play began.",
+          "type": "boolean"
+        },
+        "ls_music_disliked": {
+          "description": "Whether Music.app holds the track as disliked (ruling F2). Read when the play starts, so it is the opinion held when the play began.",
+          "type": "boolean"
+        },
+        "ls_music_album_favorited": {
+          "description": "Whether Music.app holds the track's album as a favorite (ruling F2). Read when the play starts, so it is the opinion held when the play began.",
+          "type": "boolean"
+        },
+        "ls_music_album_disliked": {
+          "description": "Whether Music.app holds the track's album as disliked (ruling F2). Read when the play starts, so it is the opinion held when the play began.",
+          "type": "boolean"
+        },
+        "ls_kind": {
+          "description": "Music.app's kind string for the file, for example MPEG audio file (ruling F3).",
+          "$ref": "#/$defs/text"
+        },
+        "ls_bit_rate": {
+          "description": "The file's bit rate in kilobits per second (ruling F3).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "ls_sample_rate": {
+          "description": "The file's sample rate in hertz (ruling F3).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "ls_music_date_added": {
+          "description": "When the track entered Music.app's library, as Unix seconds (ruling F4). Music.app's own value, read when the play starts.",
+          "$ref": "#/$defs/unix_seconds"
+        },
+        "ls_music_played_count": {
+          "description": "Music.app's own play count, never listensmith's (ruling F4). Read when the play starts, so it counts the plays BEFORE this one: Music.app updates it only after a play finishes.",
+          "$ref": "#/$defs/music_count"
+        },
+        "ls_music_skipped_count": {
+          "description": "Music.app's own skip count (ruling F4). Read when the play starts, so it describes the track before this play.",
+          "$ref": "#/$defs/music_count"
+        },
+        "ls_music_played_date": {
+          "description": "Music.app's own last-played time, as Unix seconds (ruling F4). Read when the play starts, so it is the play BEFORE this one: Music.app updates it only after a play finishes.",
+          "$ref": "#/$defs/unix_seconds"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "ls_source": { "const": "local_file" } }, "required": ["ls_source"] },
+          "then": { "required": ["ls_file_path"] }
+        },
+        {
+          "if": { "properties": { "ls_source": { "const": "catalog" } }, "required": ["ls_source"] },
+          "then": { "required": ["ls_catalog_id"] }
+        }
+      ]
+    }
+  }
+}

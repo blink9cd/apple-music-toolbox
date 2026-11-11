@@ -1,13 +1,14 @@
 """Which album group each file and each Music.app track counts toward.
 
 An album group is the album artist (else the artist), the album and the disc: a
-file's from its tags, a track's from the listing's same three fields. A file or track
-flagged as a compilation takes one fixed artist key instead of any artist name, as
-Music.app files a compilation, so its tracks' many artists make one album. Both sides
-are compared through `normalized`, so a difference of case, of composed against
-decomposed accents, or of surrounding spaces is no difference. A file whose tags
-cannot be read, and every file when mutagen is absent, falls back to the folder it
-sits in, and the report marks such a group ``(by folder)``.
+file's from its tags, a track's from the listing's same three fields, read as
+`audit_read.row_tags` reads them, so a disc past four digits is disc 1 on both sides.
+A file or track flagged as a compilation takes one fixed artist key instead of any
+artist name, as Music.app files a compilation, so its tracks' many artists make one
+album. Both sides are compared through `normalized`, so a difference of case, of
+composed against decomposed accents, or of surrounding spaces is no difference. A
+file whose tags cannot be read, and every file when mutagen is absent, falls back to
+the folder it sits in, and the report marks such a group ``(by folder)``.
 
 `file_groups` gives each walked file its group; `music_groups` gives the Music.app
 side, one group a counted track: every matched track, and every gone one inside the
@@ -33,6 +34,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from audit_read import row_tags
 from audit_rows import TrackRow
 from audit_tags import FileTags
 from audit_walk import AudioFile
@@ -113,8 +115,12 @@ def tags_group(tags: FileTags) -> Group:
 
 
 def row_group(row: TrackRow) -> Group:
-    """The group a listed track counts toward, by its own album fields."""
-    return tag_group(row.artist, row.album, row.disc, compilation=row.compilation)
+    """The group a listed track counts toward, by its own album fields.
+
+    Read through `row_tags`, so a disc past the tag read's bound is disc 1 here too,
+    as it is for the file the row stands for.
+    """
+    return tags_group(row_tags(row))
 
 
 def folder_group(folder: Path) -> Group:

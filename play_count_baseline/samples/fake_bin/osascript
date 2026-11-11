@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# A stand-in for osascript, for this samples folder's hand run ONLY: put first on PATH,
+# it answers play_count_baseline's three read-only scripts (is Music running, how many
+# tracks, list their play counts) from an invented library of four tracks, so the
+# sample never reaches the real Music.app. Any other script is refused, exit 1.
+set -euo pipefail
+
+# The invented library's folder: an invented volume, never a path on this machine. No
+# file is read; the tool only copies the path.
+library='/Volumes/Invented Drive/Music'
+
+# One listing row, its twelve fields tab separated in the script's order: persistent
+# ID, name, artist, album, album artist, disc number, duration in milliseconds, played
+# count, played date parts (Y/M/D/seconds after midnight), genre, year, and path.
+row() {
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"
+}
+
+# The whole invented library in one reply: four tracks fit in one batch.
+rows() {
+    # A played file track with every field set.
+    row 00000000000000A1 'Placeholder Opening' 'The Invented Quartet' \
+        'Placeholder Album' 'Placeholder Collective' 1 241000 12 2025/6/1/45296 \
+        'Invented Genre' 2019 "$library/The Invented Quartet/01 Placeholder Opening.m4a"
+    # A file track never played: a play count of 0 and no played date. Its album
+    # artist is its artist, so the baseline leaves the album artist out.
+    row 00000000000000A2 'Placeholder Interlude' 'The Invented Quartet' \
+        'Placeholder Album' 'The Invented Quartet' 1 98000 0 '' \
+        'Invented Genre' 2019 "$library/The Invented Quartet/02 Placeholder Interlude.m4a"
+    # A cloud-only track: no path, and no album artist, disc, genre, or year.
+    row 00000000000000B1 'Cloud Placeholder' 'The Made-Up Trio' \
+        'Cloud Placeholder Album' '' 0 187000 3 2024/12/24/72000 '' 0 ''
+    # A track with an empty artist, which the contract cannot hold: excluded.
+    row 00000000000000C1 'Nameless Placeholder' '' 'Stray Placeholder Album' '' 1 \
+        150000 5 2023/1/2/3600 'Invented Genre' 2020 "$library/Stray/Nameless Placeholder.m4a"
+    # osascript ends its output with one linefeed of its own.
+    printf '\n'
+}
+
+case "${2:-}" in
+    'application "Music" is running') printf 'true\n' ;;
+    *'return count of tracks of library playlist 1'*) printf '4\n' ;;
+    *'played count of tracks'*) rows ;;
+    *)
+        printf 'fake osascript: not a script this sample answers\n' >&2
+        exit 1
+        ;;
+esac

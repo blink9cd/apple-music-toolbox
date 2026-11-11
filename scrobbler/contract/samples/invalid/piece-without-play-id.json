@@ -1,0 +1,30 @@
+{
+  "listen_type": "single",
+  "payload": [
+    {
+      "listened_at": 1793000000,
+      "track_metadata": {
+        "artist_name": "The Paper Lanterns",
+        "track_name": "Harbor Lights at Noon",
+        "release_name": "Saltwater Almanac",
+        "additional_info": {
+          "submission_client": "scrobbler",
+          "submission_client_version": "0.1.0",
+          "media_player": "Music",
+          "tracknumber": "3",
+          "duration_ms": 214000,
+          "duration_played": 201,
+          "ls_source": "local_file",
+          "ls_media_type": "music",
+          "ls_file_path": "/Volumes/Library/Music/The Paper Lanterns/Saltwater Almanac/03 Harbor Lights at Noon.mp3",
+          "ls_persistent_id": "0A1B2C3D4E5F6071",
+          "ls_piece": 1,
+          "ls_album_artist": "The Paper Lanterns",
+          "ls_disc_number": 1,
+          "ls_genre": "Folk",
+          "ls_year": 2019
+        }
+      }
+    }
+  ]
+}

@@ -13,24 +13,17 @@ import struct
 import sys
 import unittest
 import wave
-from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+_HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(_HERE), str(_HERE.parent / "src")]
 
+import audit_fixtures as af  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_tags as at  # noqa: E402 - import follows the sys.path bootstrap above
 
 _HAS_MUTAGEN = importlib.util.find_spec("mutagen") is not None
-
-
-class _Frame:
-    """A stand-in for an ID3 text frame: its values are under ``text``."""
-
-    def __init__(self, *text: str) -> None:
-        """Hold *text* as the frame's values."""
-        self.text: Sequence[str] = text
 
 
 class ParseNumberPairTest(unittest.TestCase):
@@ -69,10 +62,10 @@ class FileTagsFromTest(unittest.TestCase):
 
     def test_id3_frames(self) -> None:
         tags = {
-            "TRCK": _Frame("2/5"),
-            "TPOS": _Frame("1/2"),
-            "TPE2": _Frame("The Placeholder Band"),
-            "TALB": _Frame("Invented Album"),
+            "TRCK": af.Frame("2/5"),
+            "TPOS": af.Frame("1/2"),
+            "TPE2": af.Frame("The Placeholder Band"),
+            "TALB": af.Frame("Invented Album"),
         }
         self.assertEqual(
             at.file_tags_from(tags),
@@ -94,10 +87,10 @@ class FileTagsFromTest(unittest.TestCase):
     def test_the_compilation_flag_is_read_in_each_format(self) -> None:
         cases: tuple[tuple[dict[str, object], bool], ...] = (
             ({}, False),
-            ({"TCMP": _Frame("1")}, True),
-            ({"TCMP": _Frame(" 1 ")}, True),
-            ({"TCMP": _Frame("0")}, False),
-            ({"TCMP": _Frame()}, False),
+            ({"TCMP": af.Frame("1")}, True),
+            ({"TCMP": af.Frame(" 1 ")}, True),
+            ({"TCMP": af.Frame("0")}, False),
+            ({"TCMP": af.Frame()}, False),
             ({"cpil": True}, True),
             ({"cpil": False}, False),
             ({"cpil": [True]}, True),
@@ -108,15 +101,15 @@ class FileTagsFromTest(unittest.TestCase):
                 self.assertIs(_read(tags).compilation, expected)
 
     def test_the_artist_stands_in_for_an_absent_or_empty_album_artist(self) -> None:
-        for album_artist in ({}, {"TPE2": _Frame("")}, {"aART": [""]}):
+        for album_artist in ({}, {"TPE2": af.Frame("")}, {"aART": [""]}):
             with self.subTest(album_artist=album_artist):
-                tags = {"TPE1": _Frame("Solo Placeholder"), **album_artist}
+                tags = {"TPE1": af.Frame("Solo Placeholder"), **album_artist}
                 self.assertEqual(_read(tags).artist, "Solo Placeholder")
         self.assertEqual(_read({"\xa9ART": ["Mp4 Solo"]}).artist, "Mp4 Solo")
 
     def test_absent_names_read_as_empty_text(self) -> None:
         self.assertEqual(
-            at.file_tags_from({"TRCK": _Frame("7")}), at.FileTags("", "", 1, 7, None)
+            at.file_tags_from({"TRCK": af.Frame("7")}), at.FileTags("", "", 1, 7, None)
         )
 
     def test_mp4_zero_total_is_no_total(self) -> None:
@@ -124,8 +117,10 @@ class FileTagsFromTest(unittest.TestCase):
 
     def test_an_id3_track_zero_is_a_pregap_track(self) -> None:
         # MusicBrainz numbers a pregap ("hidden track one") track 0, and Picard writes it.
-        self.assertEqual(_read({"TRCK": _Frame("0/14")}), at.FileTags("", "", 1, 0, 14))
-        self.assertEqual(_read({"TRCK": _Frame("0")}).track, 0)
+        self.assertEqual(
+            _read({"TRCK": af.Frame("0/14")}), at.FileTags("", "", 1, 0, 14)
+        )
+        self.assertEqual(_read({"TRCK": af.Frame("0")}).track, 0)
 
     def test_an_mp4_track_zero_is_no_track_number(self) -> None:
         # iTunes stores a blank number beside a set total as (0, total).
@@ -134,23 +129,23 @@ class FileTagsFromTest(unittest.TestCase):
         self.assertIsNone(found.total)
 
     def test_a_missing_disc_reads_as_disc_one(self) -> None:
-        for disc in ({}, {"TPOS": _Frame("0")}, {"TPOS": _Frame("x")}):
+        for disc in ({}, {"TPOS": af.Frame("0")}, {"TPOS": af.Frame("x")}):
             with self.subTest(disc=disc):
-                tags = {"TRCK": _Frame("7"), **disc}
+                tags = {"TRCK": af.Frame("7"), **disc}
                 self.assertEqual(_read(tags).disc, 1)
 
     def test_tags_with_no_usable_track_number_read_with_track_none(self) -> None:
         # Read, but not numbered: the audit counts these apart from unreadable tags.
         cases: tuple[dict[str, object], ...] = (
             {},
-            {"TRCK": _Frame()},
-            {"TRCK": _Frame("x")},
+            {"TRCK": af.Frame()},
+            {"TRCK": af.Frame("x")},
             {"trkn": []},
             {"TRCK": "7"},  # a bare string, not a list of values
         )
         for tags in cases:
             with self.subTest(tags=tags):
-                found = at.file_tags_from({"TALB": _Frame("Invented Album"), **tags})
+                found = at.file_tags_from({"TALB": af.Frame("Invented Album"), **tags})
                 assert found is not None
                 self.assertIsNone(found.track)
                 self.assertIsNone(found.total)

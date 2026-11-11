@@ -1,0 +1,36 @@
+{
+  "name": "Floor",
+  "platforms": [
+    {
+      "options": [],
+      "platformName": "macos",
+      "version": "14.0"
+    }
+  ],
+  "products": [],
+  "swiftLanguageVersions": null,
+  "targets": [
+    {
+      "dependencies": [],
+      "name": "Floor",
+      "settings": [],
+      "type": "regular"
+    },
+    {
+      "dependencies": [
+        {
+          "byName": [
+            "Floor",
+            null
+          ]
+        }
+      ],
+      "name": "FloorTests",
+      "settings": [],
+      "type": "test"
+    }
+  ],
+  "toolsVersion": {
+    "_version": "6.0.0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "listen_type": "playing_now",
+  "payload": [
+    {
+      "track_metadata": {
+        "artist_name": "Field Notes Weekly",
+        "track_name": "Episode 12: Tide Tables",
+        "additional_info": {
+          "submission_client": "scrobbler",
+          "submission_client_version": "0.1.0",
+          "media_player": "Music",
+          "duration_ms": 2400000,
+          "ls_source": "local_file",
+          "ls_media_type": "podcast",
+          "ls_file_path": "/Volumes/Library/Music/Podcasts/Field Notes Weekly/Episode 12 Tide Tables.mp3",
+          "ls_play_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+          "ls_position_seconds": 600,
+          "ls_state": "paused",
+          "ls_rate": 1.5,
+          "ls_measured_at": 1793020600
+        }
+      }
+    }
+  ]
+}

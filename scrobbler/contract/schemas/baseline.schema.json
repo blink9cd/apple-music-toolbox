@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://listensmith.invalid/contract/1/baseline.schema.json",
+  "title": "listensmith contract: a play-count baseline",
+  "$comment": "A player's lifetime play counts at one moment (ruling H4), written by a tool outside listensmith and loaded by `listensmith store import`. Kept apart from listens and never turned into listens. A track lists the D2 identity keys one by one, rather than taking common's listensmith_track, so it cannot carry a listen's ls_play_id, ls_source or ls_media_type.",
+  "type": "object",
+  "required": ["baseline_type", "captured_at", "submission_client", "submission_client_version", "tracks"],
+  "additionalProperties": false,
+  "properties": {
+    "baseline_type": { "const": "play_counts" },
+    "captured_at": { "$ref": "common.schema.json#/$defs/listened_at" },
+    "submission_client": { "$ref": "common.schema.json#/$defs/text" },
+    "submission_client_version": { "$ref": "common.schema.json#/$defs/text" },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/track" }
+    }
+  },
+  "$defs": {
+    "track": {
+      "type": "object",
+      "required": ["artist_name", "track_name", "play_count"],
+      "anyOf": [
+        { "required": ["ls_file_path"] },
+        { "required": ["ls_persistent_id"] },
+        { "required": ["ls_catalog_id"] },
+        { "required": ["recording_mbid"] }
+      ],
+      "properties": {
+        "artist_name": { "$ref": "common.schema.json#/$defs/text" },
+        "track_name": { "$ref": "common.schema.json#/$defs/text" },
+        "release_name": { "$ref": "common.schema.json#/$defs/text" },
+        "recording_mbid": { "$ref": "common.schema.json#/$defs/uuid" },
+        "duration_ms": { "type": "integer", "minimum": 0, "maximum": 2073600000 },
+        "play_count": { "$ref": "common.schema.json#/$defs/music_count" },
+        "last_played_at": { "$ref": "common.schema.json#/$defs/listened_at" },
+        "ls_file_path": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_file_path" },
+        "ls_persistent_id": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_persistent_id" },
+        "ls_catalog_id": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_catalog_id" },
+        "ls_album_artist": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_album_artist" },
+        "ls_disc_number": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_disc_number" },
+        "ls_genre": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_genre" },
+        "ls_year": { "$ref": "common.schema.json#/$defs/listensmith_track/properties/ls_year" }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

@@ -58,6 +58,14 @@ OK, FINDINGS, USAGE, INTERRUPTED = 0, 1, 2, 130
 Answer = subprocess.CompletedProcess[str] | BaseException
 
 
+class Frame:
+    """A stand-in for an ID3 text frame: its values are under ``text``."""
+
+    def __init__(self, *text: str) -> None:
+        """Hold *text* as the frame's values."""
+        self.text: Sequence[str] = text
+
+
 def completed(
     stdout: str = "", *, returncode: int = 0, stderr: str = ""
 ) -> subprocess.CompletedProcess[str]:

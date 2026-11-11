@@ -1,0 +1,30 @@
+---
+# The SwiftLint rule set for the scrobbler's Swift package: SwiftLint's own defaults, with
+# ONLY the default rules that contradict swift-format's default output aligned or
+# disabled. SwiftLint reads the nearest .swiftlint.yml above the files it lints, so this
+# file at the repository root is the one it finds for scrobbler/app.
+#
+# swift-format writes the layout and SwiftLint then judges it, so a SwiftLint default
+# that rejects swift-format's output fails every formatted file and leaves a per-line
+# suppression as the only way out. The formatter wins: each entry below was found by
+# formatting probe sources with `swift-format format` and linting the result with
+# `swiftlint lint --strict` under the defaults. Every other default rule stays on.
+
+# swift-format adds a trailing comma to every multi-element collection literal it wraps
+# (its multiElementCollectionTrailingCommas default), and SwiftLint's default forbids one.
+# Aligned rather than disabled: mandatory_comma requires the comma swift-format writes.
+trailing_comma:
+  mandatory_comma: true
+
+# swift-format puts the opening brace on its own line when a function signature, a
+# statement condition or a type header wraps; SwiftLint's default wants it on the last
+# line of the declaration. Each ignore flag covers exactly one of those three shapes.
+opening_brace:
+  ignore_multiline_function_signatures: true
+  ignore_multiline_statement_conditions: true
+  ignore_multiline_type_headers: true
+
+disabled_rules:
+  # swift-format moves a closure's parameters below the opening brace when they do not
+  # fit on its line, which this rule forbids outright; the rule has no option to allow it.
+  - closure_parameter_position

@@ -11,6 +11,8 @@ its declaration, and on a declaration nothing reads, which stops a renamed switc
 a stale name behind. It sits under tag_refresh only because a test must live under one
 tool; it scans every tool folder in this project, and skips the vendored shared
 libraries for the reason recorded beside `_VENDORED`.
+Its Python is read by syntax tree and its Swift (the scrobbler's package, whose test
+switches change a Swift gate verdict the same way) by the text of each read.
 
 One narrow class is held apart: a credential. Folding a token's value into a persisted
 cache key would write a secret's fingerprint to disk, and a credential never changes which
@@ -28,6 +30,7 @@ never reaches a verdict, while declaring it would only split the cache by machin
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 import unittest
 from pathlib import Path
@@ -37,6 +40,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # `getenv` imported from os are both seen.
 _GETTERS = frozenset({"os.environ.get", "os.getenv", "environ.get", "getenv"})
 _MAPPINGS = frozenset({"os.environ", "environ"})
+# How a read is spelled in the project's Swift: a subscript of an `environment`
+# dictionary, or a `getenv` call. The key is captured whole so a non-literal is reported.
+_SWIFT_READ = re.compile(
+    r"\benvironment\[(?P<subscript>[^\]]*)\]|\bgetenv\((?P<call>[^)]*)\)"
+)
+_SWIFT_LITERAL = re.compile(r'"([^"\\]+)"')
 # A switch the scan must find, so a scanner that silently stopped matching cannot pass
 # by finding nothing on either side.
 _KNOWN_SWITCH = "APPLE_MUSIC_TOOLBOX_OFFLINE"
@@ -48,8 +57,22 @@ _KNOWN_SWITCH = "APPLE_MUSIC_TOOLBOX_OFFLINE"
 # and a constant read through its module), which is exactly the shape this scan refuses
 # in this project's own code. Excluded by name rather than by listing the tool folders,
 # so a tool folder added later is scanned by default, which is the safe direction.
+# launchd_agent is the one vendored library still scanned: its LAUNCHD_AGENT_LIVE does
+# change which tests run, so it is a switch, and it is declared like this project's own.
 _VENDORED = frozenset(
-    {"stdio_utf8", "help_formatter", "html_page", "bounded_run", "live_pid_guard"}
+    {
+        "stdio_utf8",
+        "help_formatter",
+        "html_page",
+        "bounded_run",
+        "live_pid_guard",
+        "atomic_write",
+        "os_schedule_gen",
+        "swift_gate",
+        "pyproject_config",
+        "venv_prune",
+        "tool_subdirs",
+    }
 )
 # Credentials the project reads but must never declare, each with its reason. A mapping,
 # not a list, so an entry cannot be added without saying why.
@@ -124,20 +147,59 @@ def _names_read(source: str) -> tuple[set[str], list[str]]:
     return names, unresolved
 
 
+def _swift_names_read(source: str) -> tuple[set[str], list[str]]:
+    """Every name Swift *source* reads from the environment, and each read it cannot name.
+
+    Swift has no parser here, so a read is matched by its text: a subscript of an
+    ``environment`` dictionary (``ProcessInfo.processInfo.environment[...]``) or a
+    ``getenv(...)`` call. A key that is not one string literal comes back as
+    ``"<line>: <read>"``, for the same reason as `_names_read`. A comment that spells a read
+    is reported too: a false declaration is caught by the reverse check, a missed read is not.
+
+    Each line is matched alone, so these spellings are neither found nor reported: an
+    aliased dictionary (``let env = ProcessInfo.processInfo.environment``, then
+    ``env["X"]``), an optional subscript (``environment?["X"]``), a key test
+    (``.environment.keys.contains("X")``), and a key wrapped onto the next line. A
+    read spelled one of these ways escapes both checks, so spell it as above instead.
+    """
+    names: set[str] = set()
+    unresolved: list[str] = []
+    for number, line in enumerate(source.splitlines(), start=1):
+        for match in _SWIFT_READ.finditer(line):
+            key = match.group("subscript") or match.group("call") or ""
+            literal = _SWIFT_LITERAL.fullmatch(key.strip())
+            if literal is not None:
+                names.add(literal.group(1))
+            else:
+                unresolved.append(f"{number}: {match.group(0)}")
+    return names, unresolved
+
+
 def _is_test_file(relative: Path) -> bool:
-    """True for a suite or a fixture: a ``test_*`` file, or anything under ``tests/``."""
-    return relative.name.startswith("test_") or "tests" in relative.parts[:-1]
+    """True for a suite or a fixture: a ``test_*`` file, or anything under ``tests/``.
+
+    A Swift package's test targets live under ``Tests/``, so that spelling counts too.
+    """
+    return relative.name.startswith("test_") or bool(
+        {"tests", "Tests"} & set(relative.parts[:-1])
+    )
 
 
 def _project_reads(*, tests: bool = True) -> tuple[set[str], list[str]]:
     """Every environment read in this project's own tools, caches and vendored skipped.
 
-    With *tests* False, test files are left out, which is how an exemption is shown to
-    be held up by a read the shipped code makes rather than by a test of it.
+    Its Swift sources are read too, each by `_swift_names_read`. With *tests* False,
+    test files are left out, which is how an exemption is shown to be held up by a read
+    the shipped code makes rather than by a test of it. A path with a part starting with
+    a dot is skipped, which leaves out a SwiftPM ``.build`` folder.
     """
     names: set[str] = set()
     unresolved: list[str] = []
-    for path in sorted(_PROJECT_ROOT.rglob("*.py")):
+    scanners = {".py": _names_read, ".swift": _swift_names_read}
+    for path in sorted(_PROJECT_ROOT.rglob("*")):
+        scan = scanners.get(path.suffix)
+        if scan is None:
+            continue
         relative = path.relative_to(_PROJECT_ROOT)
         if relative.parts[0] in _VENDORED or any(
             part.startswith(".") or part == "__pycache__" for part in relative.parts
@@ -145,7 +207,7 @@ def _project_reads(*, tests: bool = True) -> tuple[set[str], list[str]]:
             continue
         if not tests and _is_test_file(relative):
             continue
-        found, unnamed = _names_read(path.read_text(encoding="utf-8"))
+        found, unnamed = scan(path.read_text(encoding="utf-8"))
         names |= found
         unresolved += [f"{relative.as_posix()}:{entry}" for entry in unnamed]
     return names, unresolved
@@ -179,6 +241,35 @@ class TestEnvDeclared(unittest.TestCase):
         _, unresolved = _names_read("def f(name):\n    return os.environ.get(name)\n")
         self.assertEqual(unresolved, ["2: os.environ.get(name)"])
 
+    def test_the_swift_scanner_sees_each_read_form(self) -> None:
+        source = (
+            'let a = ProcessInfo.processInfo.environment["A"] == "1"\n'
+            'let b = getenv("B")\n'
+            'let c = environment[ "C" ]\n'
+            '// environment["COMMENTED"] is still a read the scan reports\n'
+        )
+        self.assertEqual(_swift_names_read(source), ({"A", "B", "C", "COMMENTED"}, []))
+
+    def test_a_swift_read_the_scanner_cannot_name_is_reported(self) -> None:
+        _, unresolved = _swift_names_read("let x = 1\nlet v = environment[name]\n")
+        self.assertEqual(unresolved, ["2: environment[name]"])
+
+    def test_the_swift_scanner_misses_the_spellings_its_docstring_names(self) -> None:
+        """A known limit, pinned so that widening the line regex is a deliberate change.
+
+        None of these is found or reported, so a read spelled this way escapes both
+        checks. When the scan learns one, this case moves to the read-form test above.
+        """
+        missed = {
+            "aliased": 'let env = ProcessInfo.processInfo.environment\nenv["X"]\n',
+            "optional": 'let v = environment?["X"]\n',
+            "keys": 'let v = info.environment.keys.contains("X")\n',
+            "wrapped": 'let v = environment[\n    "X"\n]\n',
+        }
+        for spelling, source in missed.items():
+            with self.subTest(spelling=spelling):
+                self.assertEqual(_swift_names_read(source), (set(), []))
+
     def test_a_test_file_is_a_suite_or_anything_under_tests(self) -> None:
         cases = {
             "tag_refresh/tests/cli_fixtures.py": True,
@@ -187,6 +278,8 @@ class TestEnvDeclared(unittest.TestCase):
             "tag_refresh/src/refresh_core.py": False,
             "album_stats/album_stats.py": False,
             "tests.py": False,
+            "scrobbler/app/Tests/ScrobblerLiveTests/LiveSmokeTests.swift": True,
+            "scrobbler/app/Sources/ScrobblerCore/Layout.swift": False,
         }
         for relative, expected in cases.items():
             with self.subTest(relative=relative):

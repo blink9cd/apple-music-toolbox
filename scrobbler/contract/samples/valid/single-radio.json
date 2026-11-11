@@ -1,0 +1,23 @@
+{
+  "listen_type": "single",
+  "payload": [
+    {
+      "listened_at": 1793000000,
+      "track_metadata": {
+        "artist_name": "Harbor Radio Collective",
+        "track_name": "Evening Shipping Forecast",
+        "additional_info": {
+          "submission_client": "scrobbler",
+          "submission_client_version": "0.1.0",
+          "media_player": "Music",
+          "duration": 180,
+          "duration_played": 170,
+          "origin_url": "https://radio.example.invalid/stream/evening",
+          "ls_source": "radio",
+          "ls_media_type": "other",
+          "ls_play_id": "c4d5e6f7-1a2b-4c3d-8e9f-0a1b2c3d4e5f"
+        }
+      }
+    }
+  ]
+}

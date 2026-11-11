@@ -1,0 +1,14 @@
+{
+  "baseline_type": "play_counts",
+  "captured_at": 1793100000,
+  "submission_client": "play_count_baseline",
+  "submission_client_version": "0.1.0",
+  "tracks": [
+    {
+      "artist_name": "The Paper Lanterns",
+      "track_name": "Harbor Lights at Noon",
+      "ls_persistent_id": "0A1B2C3D4E5F6071",
+      "play_count": -1
+    }
+  ]
+}

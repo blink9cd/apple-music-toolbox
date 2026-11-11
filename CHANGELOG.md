@@ -2,6 +2,51 @@
 
 Notable changes to this project, newest first.
 
+## 0.3.0 - 2026-11-10
+
+### Added
+
+- `scrobbler`, a Mac app (macOS 14 or later, built with Swift 6 or later) that records
+  what Music.app plays. It reads Music.app's own playback position, never launches it,
+  splits a play on a pause of 30 minutes or more, and queues each listen as a record in
+  the listen contract that ships in `scrobbler/contract/`. It posts queued listens one at
+  a time to a listen store on the loopback interface, retrying with a 5, 15, 60, and 300
+  second backoff, and sends now-playing and stopped records to a relay on the loopback
+  interface. It writes a `status.json` heartbeat, runs as a single instance, and refuses a
+  token file other users could read. It pairs with listensmith, a listen store that is not
+  yet published; any store that implements the contract works.
+- `scrobbler.py`, which builds the app (`build --out`, with `--sign` to sign it), installs
+  it as a user LaunchAgent (building and signing it first) and confirms it started,
+  uninstalls the agent while keeping the app and its data, prints its version (`version`),
+  and reports on it (`status`, with `--session-check` to print one line per problem,
+  nothing when healthy, and always exit 0).
+- `play_count_baseline`, which reads every track's play count from Music.app, never
+  writing to it or launching it, and writes a baseline file in the listen contract's
+  format, for a listen store to import. A track with no name or no artist is left out and
+  counted. It never replaces an existing output file.
+- A `contract` extra, `jsonschema` with its pinned requirements, which
+  `play_count_baseline` needs to check every baseline it writes. The `test` extra repeats
+  the same pins for the contract tests.
+- Newly bundled shared libraries: `launchd_agent`, `atomic_write`, `os_schedule_gen`,
+  `swift_gate` with `pyproject_config` and `venv_prune`, and `tool_subdirs`, plus a root
+  `.swiftlint.yml`.
+
+### Changed
+
+- The license is now two files. `LICENSE` holds the GNU AGPL v3 text exactly as the Free
+  Software Foundation publishes it, so GitHub and other tools recognize it. `NOTICE` holds
+  the copyright line and the "or any later version" grant. The terms are unchanged:
+  AGPL-3.0-or-later.
+- The environment-declaration test also scans Swift sources.
+- The README covers the new tools' requirements, install, and tests, and type-checking one
+  folder at a time.
+
+### Fixed
+
+- `library_audit` no longer reports a false difference between files and tracks when
+  Music.app holds a disc number past four digits: such a track now counts as disc 1, as
+  its file's tag does.
+
 ## 0.2.1 - 2026-11-09
 
 ### Added

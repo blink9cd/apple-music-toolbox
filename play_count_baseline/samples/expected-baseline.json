@@ -1,0 +1,43 @@
+{
+  "baseline_type": "play_counts",
+  "captured_at": 1794340727,
+  "submission_client": "play_count_baseline",
+  "submission_client_version": "0.1.0",
+  "tracks": [
+    {
+      "artist_name": "The Invented Quartet",
+      "duration_ms": 241000,
+      "last_played_at": 1748781296,
+      "ls_album_artist": "Placeholder Collective",
+      "ls_disc_number": 1,
+      "ls_file_path": "/Volumes/Invented Drive/Music/The Invented Quartet/01 Placeholder Opening.m4a",
+      "ls_genre": "Invented Genre",
+      "ls_persistent_id": "00000000000000A1",
+      "ls_year": 2019,
+      "play_count": 12,
+      "release_name": "Placeholder Album",
+      "track_name": "Placeholder Opening"
+    },
+    {
+      "artist_name": "The Invented Quartet",
+      "duration_ms": 98000,
+      "ls_disc_number": 1,
+      "ls_file_path": "/Volumes/Invented Drive/Music/The Invented Quartet/02 Placeholder Interlude.m4a",
+      "ls_genre": "Invented Genre",
+      "ls_persistent_id": "00000000000000A2",
+      "ls_year": 2019,
+      "play_count": 0,
+      "release_name": "Placeholder Album",
+      "track_name": "Placeholder Interlude"
+    },
+    {
+      "artist_name": "The Made-Up Trio",
+      "duration_ms": 187000,
+      "last_played_at": 1735070400,
+      "ls_persistent_id": "00000000000000B1",
+      "play_count": 3,
+      "release_name": "Cloud Placeholder Album",
+      "track_name": "Cloud Placeholder"
+    }
+  ]
+}

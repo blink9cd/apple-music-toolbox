@@ -1,0 +1,220 @@
+{
+ "type": "llvm.coverage.json.export",
+ "version": "3.0.1",
+ "data": [
+  {
+   "functions": [
+    {
+     "name": "$s10FloorTests28__SwiftPMGeneratedTestRunnerV4mainyyYaFZ",
+     "count": 1,
+     "filenames": [
+      "<SCRATCH>/out/Intermediates.noindex/Floor.build/Debug/FloorTests-p.build/DerivedSources/test_entry_point.swift"
+     ],
+     "regions": [
+      [
+       559,
+       30,
+       568,
+       6,
+       1,
+       0,
+       0,
+       0
+      ],
+      [
+       562,
+       9,
+       562,
+       31,
+       0,
+       0,
+       0,
+       2
+      ],
+      [
+       563,
+       12,
+       563,
+       45,
+       1,
+       0,
+       0,
+       0
+      ],
+      [
+       563,
+       46,
+       565,
+       10,
+       1,
+       0,
+       0,
+       0
+      ],
+      [
+       566,
+       9,
+       566,
+       15,
+       0,
+       0,
+       0,
+       2
+      ]
+     ],
+     "branches": []
+    },
+    {
+     "name": "$s10FloorTests25negativeValuesAreNegativeyyF",
+     "count": 1,
+     "filenames": [
+      "<PKG>/Tests/FloorTests/FloorTests.swift"
+     ],
+     "regions": [
+      [
+       5,
+       40,
+       7,
+       2,
+       1,
+       0,
+       0,
+       0
+      ]
+     ],
+     "branches": []
+    },
+    {
+     "name": "$s10FloorTests10zeroIsZeroyyF",
+     "count": 1,
+     "filenames": [
+      "<PKG>/Tests/FloorTests/FloorTests.swift"
+     ],
+     "regions": [
+      [
+       9,
+       25,
+       11,
+       2,
+       1,
+       0,
+       0,
+       0
+      ]
+     ],
+     "branches": []
+    },
+    {
+     "name": "$s10FloorTests25positiveValuesArePositiveyyF",
+     "count": 1,
+     "filenames": [
+      "<PKG>/Tests/FloorTests/FloorTests.swift"
+     ],
+     "regions": [
+      [
+       13,
+       40,
+       15,
+       2,
+       1,
+       0,
+       0,
+       0
+      ]
+     ],
+     "branches": []
+    },
+    {
+     "name": "$s5Floor8classifyyAA4SignOSiF",
+     "count": 3,
+     "filenames": [
+      "<PKG>/Sources/Floor/Floor.swift"
+     ],
+     "regions": [
+      [
+       9,
+       44,
+       14,
+       2,
+       3,
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       6,
+       10,
+       15,
+       3,
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       16,
+       12,
+       4,
+       1,
+       0,
+       0,
+       0
+      ],
+      [
+       12,
+       4,
+       13,
+       40,
+       2,
+       0,
+       0,
+       0
+      ],
+      [
+       13,
+       23,
+       13,
+       28,
+       1,
+       0,
+       0,
+       0
+      ],
+      [
+       13,
+       31,
+       13,
+       40,
+       1,
+       0,
+       0,
+       0
+      ]
+     ],
+     "branches": []
+    },
+    {
+     "name": "$s5Floor10debugLabelySSSiF",
+     "count": 0,
+     "filenames": [
+      "<PKG>/Sources/Floor/Floor.swift"
+     ],
+     "regions": [
+      [
+       17,
+       48,
+       19,
+       2,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "branches": []
+    }
+   ]
+  }
+ ]
+}

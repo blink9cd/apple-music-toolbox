@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0",
+  "submission_client": "scrobbler",
+  "bundle_id": "local.listensmith.scrobbler",
+  "launchd_label": "local.listensmith.scrobbler",
+  "display_name": "listensmith scrobbler",
+  "app_name": "listensmith scrobbler.app",
+  "executable": "scrobbler",
+  "data_dir": "Library/Application Support/listensmith/scrobbler",
+  "config_file": ".config/listensmith/scrobbler.json",
+  "token_file": ".config/listensmith/token",
+  "signing_config": ".config/swift_gate/signing.toml",
+  "launch_agents_dir": "Library/LaunchAgents"
+}

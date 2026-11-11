@@ -108,8 +108,8 @@ _ROW_TERMINATOR = "\n"
 # and `'W'` both sort above `'-'`, so either outranked every hyphenated stamp of the
 # same year. Refusing the shape here, and keying every comparison in `_rank_albums` on
 # the parsed value, closes both halves; either alone leaves the other open. The digits
-# are spelt `[0-9]` rather than `\d`, which in a `str` pattern matches any Unicode
-# decimal digit. See docs/technical_notes/python-untrusted-input.md.
+# are spelled `[0-9]` rather than `\d`, which in a `str` pattern matches any Unicode
+# decimal digit.
 _ISOT_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 
 # Emits one line per recently-added track (not album: Music.app has no per-album

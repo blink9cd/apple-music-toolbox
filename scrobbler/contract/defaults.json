@@ -1,0 +1,8 @@
+{
+  "$comment": "Defaults every listensmith tool and the scrobbler share, each settable in that tool's config file outside every checkout. Ports: ruling S4 (I6). Feed timings: rulings C3 (heartbeat while playing) and C4 (silence before the feed is stale). max_listen_size is not a setting: it is ListenBrainz's per-listen limit in bytes as pinned (I2), which every side of the contract reads from here.",
+  "store_port": 47831,
+  "relay_port": 47832,
+  "heartbeat_seconds": 30,
+  "stale_after_seconds": 75,
+  "max_listen_size": 10240
+}

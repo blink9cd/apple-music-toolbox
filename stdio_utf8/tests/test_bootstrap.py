@@ -40,6 +40,7 @@ _BOOTSTRAPPED: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tag_refresh/tag_refresh.py", ("--help",)),
     ("library_audit/library_audit.py", ("--help",)),
     ("phone_audit/phone_audit.py", ("--help",)),
+    ("scrobbler/scrobbler.py", ("--help",)),
 )
 
 

@@ -1,0 +1,30 @@
+{
+  "listen_type": "single",
+  "payload": [
+    {
+      "listened_at": 1793000000,
+      "track_metadata": {
+        "artist_name": "Marigold Static",
+        "track_name": "Quiet Engines",
+        "release_name": "Night Transit",
+        "additional_info": {
+          "submission_client": "scrobbler",
+          "submission_client_version": "0.1.0",
+          "media_player": "Music",
+          "tracknumber": "3",
+          "duration_ms": 214000,
+          "duration_played": 201,
+          "ls_source": "catalog",
+          "ls_media_type": "music",
+          "ls_play_id": "8d1c0b2a-4e5f-4a6b-9c7d-0e1f2a3b4c5d",
+          "ls_piece": 1,
+          "ls_album_artist": "Various Artists",
+          "ls_disc_number": 1,
+          "ls_genre": "Folk",
+          "ls_year": 2019,
+          "ls_catalog_id": "1700000001"
+        }
+      }
+    }
+  ]
+}

@@ -8,8 +8,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apple-music-toolbox"
-version = "0.2.1"
-description = "Tools for Apple Music on macOS: what was added most recently, an album's favorites, making Music.app reread changed tags, and auditing a library folder and a synced iPhone for missing files"
+version = "0.3.0"
+description = "Tools for Apple Music on macOS: what was added most recently, an album's favorites, making Music.app reread changed tags, auditing a library folder and a synced iPhone for missing files, a scrobbler that records what Music.app plays, and a play-count baseline of the whole library"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 #
@@ -42,6 +42,20 @@ refresh_tags = [
   # track-number and album checks compare.
   "mutagen==1.48.1",
 ]
+# Validation against the scrobbler's copy of the listen contract's draft 2020-12 schemas:
+# the scrobbler's contract tests check records with these, and play_count_baseline, a
+# runtime tool, checks every baseline it writes with them and exits 2 naming this extra
+# when it is absent. Install it to run that tool, pip install ".[contract]". Pinned as
+# the test extra below pins them, with jsonschema's own requirements pinned to what its
+# install resolves.
+contract = [
+  "jsonschema==4.26.0",
+  "referencing==0.37.0",
+  "jsonschema-specifications==2025.9.1",
+  "rpds-py==2026.6.3",
+  "attrs==26.1.0",
+  "typing-extensions==4.16.0",
+]
 # Everything the suites need. hypothesis drives the property tests and nothing at
 # runtime imports it. The `refresh_tags` pin is repeated here, exactly, because
 # tag_refresh's and library_audit's suites import mutagen, and naming `apple-music-toolbox[refresh_tags]`
@@ -49,10 +63,22 @@ refresh_tags = [
 # own, before the project itself, would find a self-reference naming a package not yet
 # installed and look it up on the package index.
 # tag_refresh/tests/test_public_pins.py fails when this extra stops listing any
-# `refresh_tags` pin exactly.
+# `refresh_tags` pin exactly. The jsonschema set validates against the scrobbler's copy
+# of the listen contract's draft 2020-12 schemas, which the scrobbler's contract tests and
+# play_count_baseline's suites both do. It is the `contract` extra's set, repeated here for
+# the same reason the `refresh_tags` pin is, with jsonschema's own requirements pinned to
+# what its install resolves; typing-extensions is what referencing needs below Python
+# 3.13. Licenses as read when pinned: all MIT but typing-extensions, PSF-2.0. Re-read
+# them, and the versions, on every bump.
 test = [
   "hypothesis==6.165.10",
   "mutagen==1.48.1",
+  "jsonschema==4.26.0",
+  "referencing==0.37.0",
+  "jsonschema-specifications==2025.9.1",
+  "rpds-py==2026.6.3",
+  "attrs==26.1.0",
+  "typing-extensions==4.16.0",
 ]
 
 [tool.setuptools]
@@ -107,7 +133,39 @@ mypy_path = [
   # sys.path at runtime where mypy cannot see it.
   "$MYPY_CONFIG_FILE_DIR/library_audit/src",
   "$MYPY_CONFIG_FILE_DIR/phone_audit/src",
+  # The scrobbler's private src/, which its entry point and its suites put on sys.path.
+  "$MYPY_CONFIG_FILE_DIR/scrobbler/src",
+  # launchd_agent, which installs the scrobbler's launch agent, and the libraries it
+  # puts on sys.path; os_schedule_gen puts its own src/ there too.
+  "$MYPY_CONFIG_FILE_DIR/launchd_agent",
+  "$MYPY_CONFIG_FILE_DIR/atomic_write",
+  "$MYPY_CONFIG_FILE_DIR/os_schedule_gen",
+  "$MYPY_CONFIG_FILE_DIR/os_schedule_gen/src",
+  # swift_gate's private src/, whose signing reader and redaction the scrobbler's build
+  # reuses, and the two libraries its modules put on sys.path.
+  "$MYPY_CONFIG_FILE_DIR/swift_gate/src",
+  "$MYPY_CONFIG_FILE_DIR/pyproject_config",
+  "$MYPY_CONFIG_FILE_DIR/venv_prune",
+  # The subdirectory conventions os_schedule_gen's and pyproject_config's suites import.
+  "$MYPY_CONFIG_FILE_DIR/tool_subdirs",
 ]
+
+[[tool.mypy.overrides]]
+# jsonschema ships no py.typed marker. The scrobbler's contract-copy test confines it to
+# one small helper that returns plain strings, so no Any escapes into its callers.
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
+
+# The scrobbler's Swift package is gated by swift_gate, which ships here: run
+# python swift_gate/swift_gate.py --path scrobbler/app on macOS. It reads this table from
+# the nearest pyproject.toml.
+[tool.swift_gate]
+# The one macOS deployment floor the package declares, exactly.
+macos_floor = "14"
+# The real-host seams: the live Music.app layer and the executable. They are kept free of
+# logic a test could reach, and proven by the operator's live smoke test instead, so they
+# stay out of the region-coverage bar. Relative to this file's directory.
+exclude = ["scrobbler/app/Sources/ScrobblerLive", "scrobbler/app/Sources/scrobbler"]
 
 # --- Tables the shipped tests read. ---
 
@@ -124,10 +182,10 @@ mypy_path = [
 # one folder; the token is the scanner's own report text, naming the condition and
 # carrying no value.
 #
-# The exclude keeps the same scan off the license notice, which names the copyright
-# holder because that is what it is for.
+# The exclude keeps the same scan off the license notice, NOTICE, which names the
+# copyright holder because that is what it is for.
 [tool.pii_scan]
-exclude = ["LICENSE"]
+exclude = ["NOTICE"]
 
 [tool.pii_scan.allow]
 "tag_refresh/samples/library" = [
@@ -147,11 +205,24 @@ exclude = ["LICENSE"]
 # names the album folder tag_refresh's live read-only lookup test runs against; unset,
 # that test skips. PHONE_AUDIT_LIVE=1 runs phone_audit's live smoke test against the
 # connected iPhone, and LIBRARY_AUDIT_LIVE=1 runs library_audit's live read-only listing
-# test against the running Music.app; unset, each skips.
+# test against the running Music.app; unset, each skips. PLAY_COUNT_BASELINE_LIVE=1 runs
+# play_count_baseline's live read-only run against the running Music.app, into a
+# temporary folder; unset, it skips. SCROBBLER_LIVE=1 enables the
+# scrobbler's live Swift smoke test against the running Music.app; unset, it is disabled.
+# It is read by the Swift package under scrobbler/app/, which the test scans as well.
+# SCROBBLER_REGOLD=1 makes the scrobbler's Swift golden tests write their files under
+# scrobbler/contract_built/ and scrobbler/status_built/ instead of comparing against
+# them, so those tests then cannot fail. LAUNCHD_AGENT_LIVE=1 runs launchd_agent's one
+# live test, which installs and removes a throwaway agent in the real launchd; unset, it
+# skips.
 [tool.gate_cache]
 env = [
   "APPLE_MUSIC_TOOLBOX_OFFLINE",
   "TAG_REFRESH_LIVE_ALBUM",
   "PHONE_AUDIT_LIVE",
   "LIBRARY_AUDIT_LIVE",
+  "PLAY_COUNT_BASELINE_LIVE",
+  "SCROBBLER_LIVE",
+  "SCROBBLER_REGOLD",
+  "LAUNCHD_AGENT_LIVE",
 ]

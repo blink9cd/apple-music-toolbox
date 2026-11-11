@@ -20,6 +20,7 @@ sys.path[:0] = [str(_HERE), str(_HERE.parent / "src")]
 import audit_fixtures as af  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_groups as ag  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_rows as ar  # noqa: E402 - import follows the sys.path bootstrap above
+import audit_tags as at  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_walk as aw  # noqa: E402 - import follows the sys.path bootstrap above
 
 
@@ -54,6 +55,28 @@ class GroupTest(unittest.TestCase):
 
     def test_music_s_disc_zero_is_disc_one(self) -> None:
         self.assertEqual(ag.row_group(_row(disc=0)), ag.tag_group(af.BAND, af.ALBUM, 1))
+
+    def test_a_row_s_disc_past_four_digits_is_disc_one(self) -> None:
+        # Regression: row_tags read such a disc as disc 1 while row_group once
+        # kept it raw, so the two sides of one album made a false count difference.
+        past = _row(disc=at.LARGEST_NUMBER + 1)
+        self.assertEqual(ag.row_group(past), ag.tag_group(af.BAND, af.ALBUM, 1))
+        self.assertEqual(
+            ag.row_group(_row(disc=at.LARGEST_NUMBER)),
+            ag.tag_group(af.BAND, af.ALBUM, at.LARGEST_NUMBER),
+        )
+
+    def test_a_file_and_a_track_whose_discs_run_past_four_digits_are_one_group(
+        self,
+    ) -> None:
+        # A file's disc tag past four digits reads as disc 1 (audit_tags), so a gone
+        # track listing the same disc must count toward that same group.
+        read = at.file_tags_from({"TPOS": af.Frame(str(at.LARGEST_NUMBER + 1))})
+        assert read is not None
+        filed = at.FileTags(af.BAND, af.ALBUM, read.disc, 1, None)
+        self.assertEqual(
+            ag.tags_group(filed), ag.row_group(_row(disc=at.LARGEST_NUMBER + 1))
+        )
 
     def test_another_disc_or_album_is_another_group(self) -> None:
         self.assertNotEqual(ag.row_group(_row(disc=2)), ag.row_group(_row()))
