@@ -51,13 +51,27 @@ else in the library.
 
 ## What a row may claim
 
-The AppleScript concatenates each tag's text unescaped between its `tab` and
-`linefeed` delimiters, so a tag can carry anything, including the row terminator. A
-tag holding a line break followed by a `date<TAB>artist<TAB>album` triple therefore
-reads as a second row, one whose every field the tag's author chose; dated far enough
-in the future, it ranked as the newest album forever, ahead of every real addition.
-`_rank_albums` closes that in Python alone (the AppleScript is unchanged, because only a
-live run against Music.app could validate a script change):
+The AppleScript joins each track's date, album artist and album with `tab` and ends
+the row with `linefeed`. It writes each percent sign, U+001F, tab, linefeed and carriage
+return inside a name as a percent sign and that character's two hex digits, and
+`_rank_albums` reads each name back after the row splits into its three fields, so a
+name holding a delimiter neither splits its row nor forges another: a tag holding a
+line break followed by a `date<TAB>artist<TAB>album` triple is one album name, read back
+whole, and never a second row whose every field its author chose. Before the escape, such
+a row, dated far enough in the future, ranked as the newest album forever.
+
+The escape is a copy of the toolbox's shared one (`../tag_refresh/src/script_text.py`, whose
+comment gives the measurements): text item passes for the common case, then a check of
+the text's code points, because AppleScript's text search works on whole characters and
+passes by a delimiter fused with a following combining mark. It is a copy rather than
+an import because media_feeds imports this module from a toolbox whose ownership it
+checks folder by folder, over this folder and album_stats only.
+`tests/test_escaped_rows.py` pins the copy to the shared one, and
+`../tag_refresh/tests/test_script_text_osascript.py` runs the handler, cut from this script with no
+Music.app, through `osascript`.
+
+The parser keeps three rules of its own, as defense in depth for a reply the script
+did not write:
 
 - **Rows end at a linefeed and nothing else.** The script emits `linefeed`, so that is
   the only row terminator honored; `str.splitlines`, which the parser used before, also
@@ -72,10 +86,8 @@ live run against Music.app could validate a script change):
   with no offset, so a track added late in the evening can read as "tomorrow" to a run
   whose own clock sits in another zone.
 
-What this removes is the one power an injected row adds (a date its author picks),
-and no more: the text-mode capture turns CR and CRLF into LF before the parser sees
-them, so a CR or LF inside a tag still ends a row, and the text a forged row carries
-is text a crafted tag could already have carried on its own.
+The escape leaves no raw CR in a name, so the text-mode capture, which turns CR and
+CRLF into LF, can no longer make a carriage return inside a tag end a row.
 
 ## What it does
 
@@ -121,7 +133,8 @@ source (`--source auto|music|folder`) and doing anything with the result.
 
 ## Testing
 
-`test_recently_added.py` (same folder) exercises `newest_albums_from_music` against
+`test_recently_added.py` (same folder), with the suites in `tests/` that its
+`load_tests` hook runs, exercises `newest_albums_from_music` against
 a fake `run`, covering every failure branch listed above plus the collapse-then-rank
 logic: an album's many rows collapsing to one entry when `count` asks for three, an
 album taking its newest track's time (not its oldest, and not the first row

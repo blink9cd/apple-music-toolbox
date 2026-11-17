@@ -1,15 +1,29 @@
 """The listing's reply, parsed strictly: one `TrackRow` a well-formed line, the rest counted.
 
 Pure: nothing here talks to Music.app, runs a process or prints. `parse_track_rows`
-reads what `music_calls.list_tracks` returns and never raises on a bad row; it
+reads what `music_calls_list.list_tracks` returns and never raises on a bad row; it
 counts it, so the audit can say its picture of Music.app is incomplete rather than
-report a file as having no track because that track's row was unreadable.
+report a file as having no track because that track's row was unreadable. The path,
+the album and the artist arrive escaped (see ``escapedText`` in tag_refresh's
+``src/script_text.py``), so a tab, line break, U+001F or percent sign in one can
+neither split a row nor be lost; `script_text.unescape_field` reads each back after
+the row's shape is checked. The names are compared flattened all the same
+(`audit_groups.normalized`), on both sides.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+#: tag_refresh's private modules, where the escape's one decoder lives: the sibling
+#: tool folder's ``src/``, the same fixed place the entry point reaches its seam in.
+_SEAM_DIR = Path(__file__).resolve().parents[2] / "tag_refresh" / "src"
+sys.path[:0] = [str(_SEAM_DIR)]
+
+from script_text import unescape_field  # noqa: E402 - follows the sys.path bootstrap
 
 #: The one row terminator. Never ``splitlines``, which also breaks on
 #: ``\v \f \x1c-\x1e \x85 U+2028 U+2029`` and so would split a name holding one.
@@ -35,7 +49,8 @@ FILE_TRACK = "file track"
 #: it). A new field goes at the end, so the fields before it keep their places.
 #: ``[0-9]``, never ``\d``, which takes every Unicode digit.
 #: No field may hold a tab (a field boundary) or a carriage return (a text-mode read
-#: turns one into a linefeed), and the path no NUL either (``os.stat`` raises on it).
+#: turns one into a linefeed), and the path no NUL either (``os.stat`` raises on it):
+#: the path, album and artist hold their escapes, read back once the row has matched.
 _ROW = re.compile(
     rf"([0-9A-Fa-f]{{16}})\t([^\t\r]*)\t([0-9]{{1,{_MAX_NUMBER_DIGITS}}})"
     rf"\t([0-9]{{1,{_MAX_NUMBER_DIGITS}}})\t((?:/[^\t\r\x00]*)?)\t([^\t\r]*)\t([^\t\r]*)"
@@ -43,9 +58,10 @@ _ROW = re.compile(
 )
 #: The persistent ID's shape alone, for `is_track_row`.
 _PERSISTENT_ID = re.compile(r"[0-9A-Fa-f]{16}")
-#: What no text field of a returned row may hold, and what its path may not either.
+#: What the fields written raw (the cloud status and the class) may never hold.
 _FIELD_FORBIDDEN = frozenset("\t\n\r")
-_PATH_FORBIDDEN = _FIELD_FORBIDDEN | {"\x00"}
+#: What a decoded path may never hold: no escape stands for a NUL.
+_PATH_FORBIDDEN = frozenset("\x00")
 
 
 @dataclass(frozen=True)
@@ -83,7 +99,7 @@ class ParsedTracks:
 
 def is_track_row(row: TrackRow) -> bool:
     """Return whether *row* has the shape every row `parse_track_rows` returns has."""
-    texts = (row.cloud_status, row.album, row.artist, row.track_class)
+    texts = (row.cloud_status, row.track_class)
     return (
         _PERSISTENT_ID.fullmatch(row.persistent_id) is not None
         and row.disc >= 0
@@ -124,9 +140,9 @@ def _row_of(segment: str) -> TrackRow | None:
         status,
         int(disc),
         int(track),
-        path,
-        album,
-        artist,
+        unescape_field(path),
+        unescape_field(album),
+        unescape_field(artist),
         flag == _TRUE,
         kind,
         enabled == _TRUE,

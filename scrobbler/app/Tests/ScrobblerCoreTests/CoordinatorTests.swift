@@ -99,7 +99,8 @@ private func postedListen(_ call: FakeTransport.Call) throws -> Listen {
   #expect(status["playing"] as? Bool == false)
   #expect(status["now_playing"] is NSNull)
   #expect(status["last_send_error"] is NSNull)
-  #expect(status.count == 16)
+  #expect(status["automation_asked_at"] is NSNull)
+  #expect(status.count == 17)
 }
 
 @MainActor @Test func activityTurnsOnWithPlayAndOffWithPause() throws {

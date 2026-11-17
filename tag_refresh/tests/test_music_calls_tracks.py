@@ -17,6 +17,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(_HERE), str(_HERE.parent / "src")]
 
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
+import script_text  # noqa: E402 - import follows the sys.path bootstrap above
 from test_music_calls import (  # noqa: E402 - import follows the sys.path bootstrap above
     FakeRunner,
     completed,
@@ -101,8 +102,18 @@ class LookupByAlbumsTest(unittest.TestCase):
             emit.startswith("if trackFile is not missing value then set output to "),
             emit,
         )
-        self.assertTrue(emit.endswith(" & (POSIX path of trackFile) & linefeed"), emit)
+        self.assertTrue(
+            emit.endswith(" & (my escapedText(POSIX path of trackFile)) & linefeed"),
+            emit,
+        )
         self.assertEqual(lines[read + 2], "end repeat")
+
+    def test_the_script_opens_with_the_shared_escape(self) -> None:
+        # The path is escaped, so a path holding a tab or a line break neither splits
+        # its row nor forges another; `refresh_match.parse_rows` undoes it.
+        self.assertTrue(
+            music_calls.LOOKUP_SCRIPT.startswith(script_text.ESCAPE_HANDLER)
+        )
 
     def test_the_album_filter_compares_against_a_local(self) -> None:
         lines = stripped_lines(music_calls.LOOKUP_SCRIPT)

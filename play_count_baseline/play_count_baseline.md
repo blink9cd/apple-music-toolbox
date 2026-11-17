@@ -22,7 +22,8 @@ knows nothing about the store beyond the schema, and the store knows nothing abo
 - **What it reads:** every track, and every field AppleScript gives for it; a track never
   played is written with a play count of 0, and the tracks are sorted by persistent ID.
 - **Where it writes:** `--output` is required, refused inside a git working tree or when it
-  exists already, and the file is written atomically, at mode 0600.
+  exists already, and the file is written atomically, at mode 0600, and never over a file
+  that exists by then.
 - **The check:** every baseline is checked with `jsonschema` against the contract copy,
   which the toolbox's `contract` extra provides.
 
@@ -60,6 +61,18 @@ Loading it: `listensmith store import --path FILE`.
    again. A count that changed, a batch that answered a different number of rows than it was
    asked for, or any row that could not be read is refused with exit `1`: a partial baseline
    is never written, since a track missing from it would later read as its first play.
+   A row is twelve tab-separated fields ended by a linefeed. In its five text fields and
+   its path, the script writes each U+001F, tab, linefeed and carriage return as a
+   percent sign and that character's two hex digits (`%1F`, `%09`, `%0A`, `%0D`), and
+   each percent sign as `%25`, and the parser undoes it, so a title or path holding one
+   of them neither splits its row nor refuses the run, and reads back exactly.
+   AppleScript's text search works on whole characters, so a control character
+   followed by a combining mark is one character it does not match; the script
+   therefore also checks the text's code points and escapes such a control from them.
+   A percent sign fused with a following mark is left as it is, and the parser keeps
+   a sign that begins no escape, so that text reads back too. The handler is shared
+   with the other listing scripts (`../tag_refresh/src/script_text.py`), and a suite
+   there runs it through `osascript`, with no Music.app, on each of these cases.
 4. Maps the rows, one field at a time (`track_entry` in `src/baseline_map.py`), tracks
    sorted by persistent ID. A library
    where no track can be written (empty, or every track lacking a name or an artist) is
@@ -67,10 +80,14 @@ Loading it: `listensmith store import --path FILE`.
    the contract copy; a document with findings is refused and the first ten are printed,
    each as a path into the document and the rule it breaks, never the value.
 5. Checks the target again, so a file made while Music.app was read is not replaced, then
-   writes the
-   document atomically, at mode 0600, as sorted, indented UTF-8 JSON. It then reads the file
-   back and checks it again; a file that cannot be read back, or does not parse or validate,
-   is reported unconfirmed, exit `1`.
+   writes the document atomically, at mode 0600, as sorted, indented UTF-8 JSON: to a
+   temporary file beside the target, hard-linked to it (`report_file.write_new`), so a
+   reader never sees half a file and a file another process made after that check is
+   refused, exit `2`, and left as it was. A folder on a file system without hard links
+   cannot be written, exit `2`. Once the link is made the file is written: a temporary
+   file that then cannot be removed is named in one line on stderr, and the run goes on.
+   It then reads the file back and checks it again; a file that cannot be read back, or
+   does not parse or validate, is reported unconfirmed, exit `1`.
 6. Prints the summary and exits `0`.
 
 A Music.app call that fails or times out, at any step, exits `2` with one line naming the
@@ -104,7 +121,7 @@ given.
 | `0` | The baseline was written and read back valid. |
 | `1` | The library refused: it changed during the read, a batch or row could not be read, no track could be written, the document failed the schema, or the written file could not be confirmed. |
 | `2` | Could not start or write: not macOS, `--output` refused, the `contract` extra missing, Music.app not running, a Music.app call failed or timed out, or the file could not be written. |
-| `130` | Interrupted (Ctrl-C). Before the file is written, nothing is, and the line says `nothing written`; during its read-back, the line says `--output was written but not confirmed`, and the file is left unconfirmed. |
+| `130` | Interrupted (Ctrl-C). Before the file is written, nothing is, and the line says `nothing written`; once it is, as the write finishes or during its read-back, the line says `--output was written but not confirmed`, and the file is left unconfirmed. |
 
 ## Tests
 

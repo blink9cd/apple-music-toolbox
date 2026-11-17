@@ -8,6 +8,14 @@ import Testing
     #expect(SnapshotReadError.fromAppleScriptError(number: -1743) == .automationDenied)
   }
 
+  @Test func anEventThatWouldNeedConsentIsDenied() {
+    #expect(SnapshotReadError.fromAppleScriptError(number: -1744) == .automationDenied)
+  }
+
+  @Test func anEventThatTimedOutIsNamedSo() {
+    #expect(SnapshotReadError.fromAppleScriptError(number: -1712) == .timedOut)
+  }
+
   @Test func aTrackThatVanishedMidReadIsNoCurrentTrack() {
     #expect(SnapshotReadError.fromAppleScriptError(number: -1728) == .noCurrentTrack)
   }

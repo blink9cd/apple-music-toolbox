@@ -7,15 +7,18 @@ wrong, a reason: "needs attention" (exit 1) for something a person should act on
 "cannot judge" (exit 2, which outranks it) when a check could not get an answer.
 
 `status.json` is the app's report of itself, rewritten every heartbeat: Unix seconds for
-every time, null when unknown. A file that is missing, not a regular file, larger
-than `STATUS_MAX_BYTES`, not JSON (a number JSON cannot hold, such as Infinity or NaN,
-and nesting too deep to parse, included), not an object, of another format, or holding
-a field of the wrong type or a time that is not finite needs attention and is not read
-further. The file is opened without blocking, so a FIFO planted in its place is refused
-rather than waited on. Every string it holds is shown only as `shown_text`: cut to
+every time, null when unknown. A file that is missing, a symbolic link or anything else
+not a regular file, larger than `STATUS_MAX_BYTES`, not JSON (a number JSON cannot
+hold, such as Infinity or NaN, and nesting too deep to parse, included), not an object,
+of another format, or holding a field of the wrong type or a time that is not finite
+needs attention and is not read further. The file is opened without blocking and
+without following a symbolic link, so a FIFO planted in its place is refused rather
+than waited on, and a link is refused rather than followed. Every string it holds is
+shown only as `shown_text`: cut to
 `SHOWN_TEXT_MAX` characters, with every character that does not print replaced, so the
 app's text can neither forge a second line nor reach the terminal as a control. Of a readable one, attention goes to: a heartbeat older than 90 s, denied
-Automation, any refused play, a last send error a retry cannot cure (the token refused or
+Automation, a request for Automation that has waited longer than `PROMPT_LIMIT_S` (the
+optional `automation_asked_at`; a file without the key has no request; withheld when the heartbeat reason is given), any refused play, a last send error a retry cannot cure (the token refused or
 unreadable, the config refused, the queue folder unreadable or unwritable), and a queued play older than an hour.
 
 `session_lines` is the session-start hook's view: nothing when the plist is absent, one
@@ -30,6 +33,7 @@ libraries on `sys.path`.
 from __future__ import annotations
 
 import dataclasses
+import errno
 import json
 import math
 import os
@@ -58,6 +62,10 @@ SESSION_BUDGET_S: Final = 20.0
 VERIFY_TIMEOUT_S: Final = 10.0
 #: The oldest heartbeat that is still healthy.
 HEARTBEAT_LIMIT_S: Final = 90.0
+#: The longest a request for Automation may wait and still be healthy. A grant or a denial
+#: already decided answers in milliseconds, so a longer wait is a prompt on the screen
+#: that nobody has answered, or a request that hung.
+PROMPT_LIMIT_S: Final = 10.0
 #: The oldest queued play that is still healthy.
 QUEUE_LIMIT_S: Final = 3600.0
 #: The status.json format this reader understands.
@@ -75,7 +83,7 @@ HOME_TOKEN: Final = "$HOME"
 #: The command a session line points the reader at.
 DETAILS: Final = "scrobbler.py status"
 #: The prefix of every line the scrobbler prints about itself.
-STEM: Final = "listensmith scrobbler"
+STEM: Final = "Listensmith Scrobbler"
 #: The last send errors a retry cannot cure: a person has to fix the token, the config or
 #: the queue folder itself.
 _STUCK_ERRORS: Final = ("token refused", "queue unreadable", "queue unwritable")
@@ -129,6 +137,8 @@ class AppStatus:
     last_sent_at: float | None
     last_send_error: str | None
     automation_denied: bool
+    #: When the request for Automation still in flight began; None when none is.
+    automation_asked_at: float | None
 
 
 class StatusFileError(ValueError):
@@ -188,7 +198,11 @@ class _Found:
         """Add a row, and a needs-attention reason when `attention` is given."""
         self.rows.append((label, value))
         if attention is not None:
-            self.reasons.append(Reason(NEEDS_ATTENTION, attention))
+            self.attention(attention)
+
+    def attention(self, text: str) -> None:
+        """Add a needs-attention reason."""
+        self.reasons.append(Reason(NEEDS_ATTENTION, text))
 
     def cannot(self, label: str, value: str, why: str) -> None:
         """Add a row and a cannot-judge reason."""
@@ -250,6 +264,7 @@ def parse_app_status(document: object) -> AppStatus:
         last_sent_at=_optional_number(document, "last_sent_at"),
         last_send_error=_optional_text(document, "last_send_error"),
         automation_denied=denied,
+        automation_asked_at=_optional_number(document, "automation_asked_at"),
     )
 
 
@@ -264,14 +279,18 @@ def shown_text(text: str) -> str:
 def _read_bounded(path: Path) -> bytes:
     """The bytes of the regular file at `path`, refused when it is anything else or too big.
 
-    Opened without blocking and checked through the open descriptor, so a FIFO or a
-    device is refused rather than read, and the file checked is the file read.
+    Opened without blocking and without following a symbolic link, then checked through
+    the open descriptor, so a FIFO, a device or a link is refused rather than read, and
+    the file checked is the file read.
     """
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     except FileNotFoundError:
         raise StatusFileError("it is missing") from None
     except OSError as error:
+        # O_NOFOLLOW fails a link at the path with ELOOP, a link to nothing included.
+        if error.errno == errno.ELOOP:
+            raise StatusFileError("it is a symbolic link, not a regular file") from None
         raise StatusFileError(f"it cannot be read ({type(error).__name__})") from None
     try:
         status = os.fstat(descriptor)
@@ -366,22 +385,23 @@ def judge_app_status(
     found.row("newest queued", age_text(status.last_queued_at, now))
     found.row("last sent", age_text(status.last_sent_at, now))
     found.row("version", status.version or _NONE)
-    if status.heartbeat_at is None:
-        found.reasons.append(
-            Reason(NEEDS_ATTENTION, "the app has written no heartbeat")
-        )
-    elif now - status.heartbeat_at > HEARTBEAT_LIMIT_S:
-        age = int(now - status.heartbeat_at)
-        found.reasons.append(
-            Reason(NEEDS_ATTENTION, f"the app's heartbeat is {age} s old")
-        )
+    beat = status.heartbeat_at
+    stopped = beat is None or now - beat > HEARTBEAT_LIMIT_S
+    if beat is None:
+        found.attention("the app has written no heartbeat")
+    elif stopped:
+        found.attention(f"the app's heartbeat is {int(now - beat)} s old")
     if status.automation_denied:
-        found.reasons.append(
-            Reason(
-                NEEDS_ATTENTION,
-                "Automation of Music is denied: allow it in System Settings, Privacy & "
-                "Security, Automation",
-            )
+        found.attention(
+            "Automation of Music is denied: allow it in System Settings, Privacy & "
+            "Security, Automation"
+        )
+    # A stopped app's pending time is stale, and its heartbeat reason says what is wrong.
+    asked = status.automation_asked_at
+    if not stopped and asked is not None and now - asked > PROMPT_LIMIT_S:
+        found.attention(
+            f"an Automation prompt for Music has waited {int(now - asked)} s: it "
+            "needs an answer on the Mac's screen"
         )
     _judge_queue(found, status, paths, now)
 
@@ -392,25 +412,19 @@ def _judge_queue(
     """Reasons for refused plays, a stuck send error, and an old queued play."""
     if status.refused_count > 0:
         noun = "play" if status.refused_count == 1 else "plays"
-        found.reasons.append(
-            Reason(
-                NEEDS_ATTENTION,
-                f"{status.refused_count} {noun} the store refused wait in "
-                f"{paths.refused_dir}",
-            )
+        found.attention(
+            f"{status.refused_count} {noun} the store refused wait in "
+            f"{paths.refused_dir}"
         )
     stuck = _send_error_problem(status.last_send_error)
     if stuck is not None:
-        found.reasons.append(Reason(NEEDS_ATTENTION, stuck))
+        found.attention(stuck)
     oldest = status.oldest_queued_at
     if oldest is not None and now - oldest > QUEUE_LIMIT_S:
         minutes = int(now - oldest) // _SECONDS_PER_MINUTE
-        found.reasons.append(
-            Reason(
-                NEEDS_ATTENTION,
-                f"the oldest queued play is {minutes} minutes old (last send error: "
-                f"{status.last_send_error or _NONE})",
-            )
+        found.attention(
+            f"the oldest queued play is {minutes} minutes old (last send error: "
+            f"{status.last_send_error or _NONE})"
         )
 
 

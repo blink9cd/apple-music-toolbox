@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMTRunnerAllowlist</key>
+	<dict>
+		<key>python</key>
+		<string>&lt;venv&gt;/bin/python</string>
+		<key>scripts</key>
+		<array>
+			<string>&lt;checkout&gt;/runner/grant_probe/grant_probe.py</string>
+		</array>
+	</dict>
+	<key>CFBundleDisplayName</key>
+	<string>Apple Music Toolbox Runner</string>
+	<key>CFBundleExecutable</key>
+	<string>runner</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.apple-music-toolbox.runner</string>
+	<key>CFBundleName</key>
+	<string>Apple Music Toolbox Runner</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Apple Music Toolbox Runner runs the Apple Music tools you schedule on this Mac, so they can read your library while you are away. It never changes playback.</string>
+</dict>
+</plist>

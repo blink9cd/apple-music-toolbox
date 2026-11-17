@@ -95,6 +95,27 @@ class DiscoveryTests(unittest.TestCase):
         sources = swgate_subject.package_sources(pkg, (pkg / "Sources/A/Gen",))
         self.assertEqual(sources, (pkg / "Sources/A/A.swift",))
 
+    def test_a_nested_worktree_is_not_walked_but_its_sibling_is(self) -> None:
+        """Regression: another checkout's package is not this tree's subject.
+
+        A linked worktree a tool keeps inside the primary checkout (here at
+        ``.claude/worktrees/<name>``) has a ``.git`` FILE at its top; gated from the
+        primary's root, its package would be built as this tree's own.
+        """
+        worktree = self.root / ".claude" / "worktrees" / "x"
+        write(worktree / ".git", "gitdir: elsewhere\n")
+        make_package(worktree / "theirs")
+        write(worktree / "loose.swift", "let x = 1\n")
+        ours = make_package(self.root / "sibling")
+        found = swgate_subject.discover(self.root)
+        self.assertEqual((found.status, found.packages), (SUBJECT_READY, (ours,)))
+
+    def test_a_walk_rooted_at_a_checkout_still_walks_it(self) -> None:
+        write(self.root / ".git", "gitdir: elsewhere\n")
+        ours = make_package(self.root / "pkg")
+        found = swgate_subject.discover(self.root)
+        self.assertEqual((found.status, found.packages), (SUBJECT_READY, (ours,)))
+
 
 class SubjectExitTests(unittest.TestCase):
     """main(): nothing to gate is 0, Swift outside SwiftPM is 2, packages in turn."""

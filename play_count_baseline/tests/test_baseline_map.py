@@ -20,6 +20,7 @@ from hypothesis import strategies as st
 _HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(_HERE), str(_HERE.parent / "src")]
 
+import _play_count_baseline_fuzz_profile  # noqa: E402, F401 - loads the deterministic profile before any @given
 import baseline_map as bm  # noqa: E402 - import follows the sys.path bootstrap above
 import baseline_rows  # noqa: E402 - import follows the sys.path bootstrap above
 import baseline_schema  # noqa: E402 - import follows the sys.path bootstrap above

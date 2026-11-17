@@ -1,8 +1,8 @@
 """The play-count read: one AppleScript listing a range of tracks, sent through tag_refresh.
 
 Read-only. `list_play_counts` sends `PLAY_COUNTS_SCRIPT` for a 1-based inclusive range
-and returns its raw reply, one tab-separated row a track, for `baseline_rows` to
-parse; nothing is parsed here.
+through `music_calls.call` and returns its raw reply, one tab-separated row a track,
+for `baseline_rows` to parse; nothing is parsed here.
 
 The seam is a documented contract, as it is for library_audit: this tool reaches
 Music.app only through `music_calls`, in the sibling ``tag_refresh/src/`` folder, with
@@ -21,32 +21,30 @@ SEAM_DIR = Path(__file__).resolve().parents[2] / "tag_refresh" / "src"
 sys.path[:0] = [str(SEAM_DIR)]
 
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
-
-# music_calls is at the 500-line file cap, so its one call primitive is imported under a
-# public name here rather than renamed there, which would touch ten other suites.
-from music_calls import _call as call_script  # noqa: E402 - follows the sys.path bootstrap above
+import script_text  # noqa: E402 - import follows the sys.path bootstrap above
 
 # argv: the first and last index, 1-based and inclusive. Read-only. Built line for line
-# on music_calls.LIST_TRACKS_SCRIPT, whose comment gives the reasons: plain track ranges,
+# on music_calls_list.LIST_TRACKS_SCRIPT, whose comment gives the reasons: plain track ranges,
 # one Apple event a property for the whole range inside the shared in-script bound,
 # `location` per file track in a `try` that re-raises -1712 when the range holds another
-# class, every list's length checked against the persistent IDs', the rows built after
-# the `tell` from locals alone, and `flatText` on every text field. `dateParts` and
-# `milliseconds` are the scrobbler's own (scrobbler/app/Sources/ScrobblerCore/
-# MusicScripts.swift), so a played date leaves as local parts and a duration as whole
-# milliseconds. The row's fields are `list_play_counts`'s; the album artist is raw, with
-# no fall-back to the artist.
-PLAY_COUNTS_SCRIPT = f"""on flatText(theText)
-    if theText is missing value then return ""
-    set savedDelimiters to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to {{tab, linefeed, return}}
-    set theParts to text items of theText
-    set AppleScript's text item delimiters to " "
-    set flatResult to theParts as text
-    set AppleScript's text item delimiters to savedDelimiters
-    return flatResult
-end flatText
-
+# class, every list's length checked against the persistent IDs', and the rows built
+# after the `tell` from locals alone. `dateParts` and `milliseconds` are the scrobbler's
+# own (scrobbler/app/Sources/ScrobblerCore/MusicScripts.swift), so a played date leaves
+# as local parts and a duration as whole milliseconds. The row's fields are
+# `list_play_counts`'s; the album artist is raw, with no fall-back to the artist.
+# The script opens with `script_text.ESCAPE_HANDLER`, the handler every listing script
+# shares, whose comment says how it works: `escapedText` writes each percent sign,
+# U+001F, tab, linefeed and carriage return in a text field or the path as a percent
+# sign and its two hex digits, reading `missing value` as "", and
+# `baseline_rows.unescape_field` undoes it. A text item pass cannot see a delimiter
+# fused with a following combining mark, so the handler also checks code points and
+# rebuilds such text from them; the delimiter therefore never reaches the row raw, and
+# every character reads back. Unlike the `flatText` it replaced, which turned a tab or
+# line break into a space, it loses nothing. tag_refresh's
+# `tests/test_script_text_osascript.py` runs the handler cut from this script.
+PLAY_COUNTS_SCRIPT = (
+    script_text.ESCAPE_HANDLER
+    + f"""
 on numberText(theNumber)
     if theNumber is missing value then return "0"
     return theNumber as string
@@ -124,7 +122,7 @@ on run argv
         set trackFile to item i of trackFiles
         set trackPath to ""
         if trackFile is not missing value then set trackPath to POSIX path of trackFile
-        set rowText to (item i of trackIDs) & tab & (my flatText(item i of trackNames)) & tab & (my flatText(item i of trackArtists)) & tab & (my flatText(item i of trackAlbums)) & tab & (my flatText(item i of albumArtists)) & tab & (my numberText(item i of discNumbers)) & tab & (my milliseconds(item i of trackDurations)) & tab & (my numberText(item i of playedCounts)) & tab & (my dateParts(item i of playedDates)) & tab & (my flatText(item i of trackGenres)) & tab & (my numberText(item i of trackYears)) & tab & trackPath
+        set rowText to (item i of trackIDs) & tab & (my escapedText(item i of trackNames)) & tab & (my escapedText(item i of trackArtists)) & tab & (my escapedText(item i of trackAlbums)) & tab & (my escapedText(item i of albumArtists)) & tab & (my numberText(item i of discNumbers)) & tab & (my milliseconds(item i of trackDurations)) & tab & (my numberText(item i of playedCounts)) & tab & (my dateParts(item i of playedDates)) & tab & (my escapedText(item i of trackGenres)) & tab & (my numberText(item i of trackYears)) & tab & (my escapedText(trackPath))
         set end of trackRows to rowText
     end repeat
     set savedDelimiters to AppleScript's text item delimiters
@@ -133,6 +131,7 @@ on run argv
     set AppleScript's text item delimiters to savedDelimiters
     return output
 end run"""
+)
 
 
 def list_play_counts(first: int, last: int, *, run: music_calls.Runner) -> str:
@@ -142,10 +141,11 @@ def list_play_counts(first: int, last: int, *, run: music_calls.Runner) -> str:
     (0 for none), duration in milliseconds (empty for none), played count, played
     date parts (``Y/M/D/seconds-after-midnight``, empty for none), genre, year (0 for
     none), and POSIX path (empty for none), tab separated and ended by a linefeed;
-    osascript adds one linefeed after the whole reply. Raises `ValueError` for a
+    osascript adds one linefeed after the whole reply. The five text fields and the
+    path are escaped (`baseline_rows.unescape_field` reverses it). Raises `ValueError` for a
     range that cannot exist, before any call is made, and `music_calls.CallTimedOut`
     or `music_calls.CallFailed` as every call there does.
     """
     if not 1 <= first <= last:
         raise ValueError(f"not a 1-based inclusive range: {first} to {last}")
-    return call_script(PLAY_COUNTS_SCRIPT, (str(first), str(last)), run)
+    return music_calls.call(PLAY_COUNTS_SCRIPT, (str(first), str(last)), run)

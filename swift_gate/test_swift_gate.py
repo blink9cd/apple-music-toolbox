@@ -39,11 +39,15 @@ _MIN_TESTS_BY_FILE: dict[str, int] = {
     "test_coverage.py": 12,
     "test_live.py": 2,
     "test_manifest.py": 22,
+    "test_os_errors.py": 5,
     "test_markers.py": 9,
+    "test_redaction.py": 19,
+    "test_redaction_bounds.py": 5,
+    "test_redaction_shapes.py": 37,
     "test_signing.py": 32,
     "test_signing_guard.py": 30,
     "test_stages.py": 16,
-    "test_subject.py": 12,
+    "test_subject.py": 14,
 }
 # This module's OWN tests: the guards below, which are the only reason the file exists.
 # Kept apart from the grouped floors rather than summed into one total. A combined number

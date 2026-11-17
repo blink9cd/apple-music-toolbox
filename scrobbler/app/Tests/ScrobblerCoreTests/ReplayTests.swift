@@ -11,7 +11,7 @@ private let samplesDir = scrobblerDir.appendingPathComponent("samples")
 /// An invented track's notice, as one trace line's JSON.
 private func noticeLine(at time: Double, _ state: String, id: String = trackOne) -> String {
   """
-  {"at": \(time), "notice": {"Player State": "\(state)", "Persistent ID": "\(id)", \
+  {"at": \(time), "notice": {"Player State": "\(state)", "PersistentID": "\(id)", \
   "Name": "Paper Comet", "Artist": "Velvet Marsh", "Album": "Tin Harbor", "Total Time": 214000}}
   """
 }

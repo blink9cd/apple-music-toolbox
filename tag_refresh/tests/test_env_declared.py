@@ -71,6 +71,7 @@ _VENDORED = frozenset(
         "swift_gate",
         "pyproject_config",
         "venv_prune",
+        "nested_checkout",
         "tool_subdirs",
     }
 )

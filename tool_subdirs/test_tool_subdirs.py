@@ -49,7 +49,7 @@ import tool_subdirs  # noqa: E402 - import follows the sys.path bootstrap above
 # otherwise drop to zero silently: "no tests ran" and "every test passed" share an exit
 # code, and a coverage figure cannot tell them apart.
 _SUITE_DIR = _HERE / tool_subdirs.SUITE_DIR_NAME
-_MIN_GROUPED_TESTS_BY_FILE: dict[str, int] = {"test_subdirs_suite_reach.py": 37}
+_MIN_GROUPED_TESTS_BY_FILE: dict[str, int] = {"test_subdirs_suite_reach.py": 39}
 
 
 class SuiteDirNameTests(unittest.TestCase):

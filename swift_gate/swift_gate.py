@@ -22,8 +22,9 @@ SWG005  no code region measured: the result verifies nothing
 
 Exit 0 clean, or nothing to gate; 1 findings, a build or test failure, a timeout, or
 coverage below ``--min-percent``; 2 could not run (no Swift toolchain or not macOS, Swift
-outside any SwiftPM package, a missing ``macos_floor``, an untrusted dump or export, or,
-with ``--sign``, a malformed signing setting or one inside a checkout).
+outside any SwiftPM package, a missing ``macos_floor``, an untrusted dump or export, a
+scratch dir that cannot be created or cleared, or, with ``--sign``, a malformed signing
+setting or one inside a checkout).
 Needs Python 3.11+ (stdlib ``tomllib``).
 """
 
@@ -64,14 +65,22 @@ from swgate_model import (  # noqa: E402 - same bootstrap
     RunFn,
     SigningSetting,
     Subject,
+    os_reason,
 )
 from swgate_report import format_results  # noqa: E402 - same bootstrap
 from swgate_signing import (  # noqa: E402 - same bootstrap
     checkout_roots,
     enclosing_checkout,
+    home_or_default,
     read_signing_identity,
+    render_path,
 )
-from swgate_stages import default_scratch_base, run_stages  # noqa: E402 - same bootstrap
+from swgate_stages import (  # noqa: E402 - same bootstrap
+    ScratchError,
+    SwiftLaunchError,
+    default_scratch_base,
+    run_stages,
+)
 from swgate_subject import discover  # noqa: E402 - same bootstrap
 
 DEFAULT_MIN_PERCENT = 100.0
@@ -132,15 +141,19 @@ def _expanded_path(text: str) -> Path:
     return Path(text).expanduser()
 
 
-def _signing_setting(args: argparse.Namespace) -> SigningSetting | None:
-    """The signing setting when ``--sign`` is on, else None and nothing is read."""
+def _signing_setting(args: argparse.Namespace, home: Path) -> SigningSetting | None:
+    """The signing setting when ``--sign`` is on, else None and nothing is read.
+
+    Every message the lookup raises shows a path under *home* from ``~``.
+    """
     if not args.sign:
         return None
+    timeout = GIT_TIMEOUT_SECONDS
     roots = (
-        *checkout_roots(args.path.resolve(), _run_git, timeout=GIT_TIMEOUT_SECONDS),
-        *enclosing_checkout(args.signing_config, _run_git, timeout=GIT_TIMEOUT_SECONDS),
+        *checkout_roots(args.path.resolve(), _run_git, timeout=timeout, home=home),
+        *enclosing_checkout(args.signing_config, _run_git, timeout=timeout, home=home),
     )
-    return read_signing_identity(args.signing_config, checkout_roots=roots)
+    return read_signing_identity(args.signing_config, checkout_roots=roots, home=home)
 
 
 def locate_swift(explicit: str | None, platform_name: str) -> str | None:
@@ -180,7 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
             "passes). Exit codes: 0 clean or nothing "
             "to gate; 1 findings, a build or test failure, a timeout, or coverage below "
             "--min-percent; 2 could not run (no toolchain, not macOS, Swift outside any "
-            "SwiftPM package, no macos_floor, or an untrusted dump or export)."
+            "SwiftPM package, no macos_floor, an untrusted dump or export, or a scratch "
+            "dir that cannot be created or cleared)."
         ),
     )
     parser.add_argument(
@@ -240,55 +254,68 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _gate_one(subject: Subject, opts: GateOptions, run: RunFn) -> GateResult:
-    """Gate one package; an untrusted dump or export, or a missing tool, is exit 2."""
+    """Gate one package; an untrusted dump or export, a scratch or tool failure, is exit 2."""
     try:
         return run_stages(subject, opts, run, codesign=_run_codesign)
     except (ParseError, ConfigError) as exc:
         return GateResult(2, f"ERROR: {exc}")
-    except OSError as exc:
-        # Missing, not executable, or otherwise unlaunchable: the class and the OS's
-        # reason only, since the exception's own text carries the absolute driver path.
-        reason = exc.strerror or "no reason given"
+    except ScratchError as exc:
         return GateResult(
-            2, f"ERROR: could not run swift: {type(exc).__name__}: {reason}"
+            2,
+            f"ERROR: could not {exc.action} the scratch directory: "
+            f"{os_reason(exc.error)}",
         )
+    except SwiftLaunchError as exc:
+        # Missing, not executable, or otherwise unlaunchable: raised only at the launch.
+        return GateResult(2, f"ERROR: could not run swift: {os_reason(exc.error)}")
+    except OSError as exc:
+        # Anything else the OS refused (the sign stage's temp dir or copy, the coverage
+        # report's read): named by class and reason, never as a swift launch.
+        return GateResult(2, f"ERROR: an OS error stopped the gate: {os_reason(exc)}")
 
 
-def _refusal(discovery: Discovery) -> str | None:
+def _refusal(discovery: Discovery, home: Path) -> str | None:
     """The exit-2 message for Swift outside SwiftPM, or None when there is none."""
     if discovery.status != SUBJECT_NOT_SWIFTPM:
         return None
     shown = ", ".join(os.path.relpath(p, discovery.root) for p in discovery.strays)
     return (
         f"ERROR: swift_gate gates SwiftPM packages only: no Package.swift owns "
-        f"{shown} under {discovery.root}"
+        f"{shown} under {render_path(discovery.root, home)}"
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """CLI entry point. Returns 0 (clean or skipped), 1 (findings), 2 (could not run)."""
+def main(argv: Sequence[str] | None = None, *, home: Path | None = None) -> int:
+    """CLI entry point. Returns 0 (clean or skipped), 1 (findings), 2 (could not run).
+
+    *home* is where every path a message names is shown from ``~``: the package's, the
+    signing setting's, and those in codesign's output. It defaults to the running user's,
+    read at run time.
+    """
     stdio_utf8.force_utf8_streams(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.path.is_dir():
         parser.error(f"--path {args.path} is not a directory")
+    home_dir = home_or_default(home)
     try:
         config = read_config(args.path)
         excludes = (*config.excludes, *(item.resolve() for item in args.exclude))
         discovery = discover(args.path, excludes)
         if discovery.status == SUBJECT_NOTHING:
-            print(f"{discovery.root}: no Swift found; nothing to gate (skipped).")
+            shown = render_path(discovery.root, home_dir)
+            print(f"{shown}: no Swift found; nothing to gate (skipped).")
             return 0
-        refusal = _refusal(discovery)
+        refusal = _refusal(discovery, home_dir)
         if refusal is not None:
             print(refusal, file=sys.stderr)
             return 2
         floor = require_floor(config)
-        signing = _signing_setting(args)
+        signing = _signing_setting(args, home_dir)
     except ConfigError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-    return _gate_all(args, discovery, excludes, floor, signing)
+    return _gate_all(args, discovery, excludes, floor, signing, home_dir)
 
 
 def _gate_all(
@@ -297,6 +324,7 @@ def _gate_all(
     excludes: tuple[Path, ...],
     floor: str,
     signing: SigningSetting | None,
+    home: Path,
 ) -> int:
     """Locate the toolchain, gate every package in turn, and report."""
     swift = locate_swift(args.swift, sys.platform)
@@ -314,12 +342,13 @@ def _gate_all(
         min_percent=args.min_percent,
         timeout=args.timeout_seconds,
         signing=signing,
+        home=home,
     )
     results = [
         (subject, _gate_one(subject, opts, _run_swift))
         for subject in (Subject(p, excludes) for p in discovery.packages)
     ]
-    print(format_results(results, args.min_percent, as_json=args.json))
+    print(format_results(results, args.min_percent, as_json=args.json, home=home))
     return max(result.returncode for _, result in results)
 
 

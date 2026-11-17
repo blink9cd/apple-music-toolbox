@@ -5,7 +5,7 @@ import Testing
 /// The tripwire's answers: a test runner is refused unless the live switch is on, and
 /// anything else is allowed.
 @Suite struct LiveGuardTests {
-  static let app = "/Applications/listensmith scrobbler.app/Contents/MacOS/scrobbler"
+  static let app = "/Applications/Listensmith Scrobbler.app/Contents/MacOS/scrobbler"
   static let helper = "/usr/bin/swiftpm-testing-helper"
   static let live = ["SCROBBLER_LIVE": "1"]
 

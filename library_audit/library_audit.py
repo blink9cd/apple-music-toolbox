@@ -65,17 +65,13 @@ import bounded_run  # noqa: E402 - import follows the sys.path bootstrap above
 import help_formatter  # noqa: E402 - import follows the sys.path bootstrap above
 import html_page  # noqa: E402 - import follows the sys.path bootstrap above
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
+import music_calls_list  # noqa: E402 - import follows the sys.path bootstrap above
 import refresh_core  # noqa: E402 - import follows the sys.path bootstrap above
 import report_file  # noqa: E402 - import follows the sys.path bootstrap above
 import stdio_utf8  # noqa: E402 - import follows the sys.path bootstrap above
 
 #: The one platform Music.app and ``osascript`` exist on.
 _DARWIN = "darwin"
-#: The three report formats. HTML goes to a file only (``--report``), and no format is
-#: ever inferred from the report's name.
-FORMAT_TEXT, FORMAT_JSON, FORMAT_HTML = "text", "json", "html"
-#: The refusal of ``--format html`` with no ``--report``.
-HTML_NEEDS_REPORT = "--format html needs --report: the page is written to a file only"
 #: Tracks listed a call. Each call reads twelve properties for the whole range, one
 #: Apple event each. Measured read-only on a library of about 20,000 tracks, reading them over
 #: a plain track range took roughly 1 s per 250 tracks and 2.4 s per 2000, so a
@@ -132,23 +128,6 @@ def real_wiring() -> Wiring:
 # --- The options ---------------------------------------------------------------------
 
 
-class _HelpFormatter(
-    help_formatter.ReqAwareDefaultsFormatter, argparse.RawDescriptionHelpFormatter
-):
-    """Every real default shown, the epilog's breaks kept.
-
-    The two bases override different methods, so they compose. A default of None, which
-    --decode takes in place of False, is no value a person could type, so it is not
-    shown: each such option's help says instead what leaving it out or giving it means.
-    """
-
-    def _get_help_string(self, action: argparse.Action) -> str | None:
-        """*action*'s help, with its default appended unless that default is None."""
-        if action.default is None:
-            return action.help
-        return super()._get_help_string(action)
-
-
 _EPILOG = f"""\
 Prerequisites:
   macOS, with Music.app already running: it is asked whether it is running and is
@@ -189,11 +168,15 @@ Exit codes:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The CLI: every argument a named option, every real default shown."""
+    """The CLI: every argument a named option, every real default shown.
+
+    The formatter hides a None default, which --decode takes in place of False: no
+    one types it, so its help says instead what giving the switch means.
+    """
     parser = argparse.ArgumentParser(
         description="Find where a library folder's audio files and Music.app disagree. "
         "Read-only.",
-        formatter_class=_HelpFormatter,
+        formatter_class=help_formatter.RawNoneHidingFormatter,
         epilog=_EPILOG,
     )
     parser.add_argument(
@@ -205,8 +188,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--format",
-        choices=(FORMAT_TEXT, FORMAT_JSON, FORMAT_HTML),
-        default=FORMAT_TEXT,
+        choices=report_file.FORMATS,
+        default=report_file.FORMAT_TEXT,
         help="The report's form; html needs --report, and is never inferred from it.",
     )
     parser.add_argument(
@@ -224,24 +207,6 @@ def build_parser() -> argparse.ArgumentParser:
         "listing each that does not decode. Slow: hours on a large library.",
     )
     return parser
-
-
-def refuse_bad_report(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> None:
-    """Exit 2 through *parser* when ``--report`` cannot be written, before any work."""
-    if args.report is None:
-        return
-    reason = report_file.refusal(args.report)
-    if reason is not None:
-        parser.error(f"--report: {reason}")
-
-
-def refuse_html_to_stdout(args: argparse.Namespace) -> str | None:
-    """Why the options cannot run, when ``--format html`` names no ``--report``."""
-    if args.format == FORMAT_HTML and args.report is None:
-        return HTML_NEEDS_REPORT
-    return None
 
 
 # --- Output --------------------------------------------------------------------------
@@ -287,7 +252,9 @@ def _list_batch(
     A row parsed or counted unparsed stands for one track, so any other number of
     rows means the reply is not the range asked for, and is a failed call.
     """
-    parsed = audit_rows.parse_track_rows(music_calls.list_tracks(first, last, run=run))
+    parsed = audit_rows.parse_track_rows(
+        music_calls_list.list_tracks(first, last, run=run)
+    )
     answered, asked = len(parsed.rows) + parsed.unparsed, last - first + 1
     if answered != asked:
         raise music_calls.CallFailed(
@@ -423,30 +390,23 @@ def _audit(library: Path, wiring: Wiring, decode: bool) -> audit_report.Audit:
     )
 
 
+def _render(args: argparse.Namespace, audit: audit_report.Audit) -> str:
+    """The report in its format."""
+    if args.format == report_file.FORMAT_JSON:
+        return audit_report.format_json(audit)
+    if args.format == report_file.FORMAT_HTML:
+        # The JSON format's own object, so the page and the JSON never disagree.
+        return audit_html.format_html(audit_report.report_dict(audit))
+    return audit_report.format_text(audit)
+
+
 def _deliver(args: argparse.Namespace, audit: audit_report.Audit, prog: str) -> int:
     """Print or write the report in its format; return the run's exit code."""
-    if args.format == FORMAT_JSON:
-        text = audit_report.format_json(audit)
-    elif args.format == FORMAT_HTML:
-        # The JSON format's own object, so the page and the JSON never disagree.
-        text = audit_html.format_html(audit_report.report_dict(audit))
-    else:
-        text = audit_report.format_text(audit)
-    if args.report is None:
-        print(text, end="")
-        return audit_report.exit_code(audit)
-    # Asked again at the moment of writing: the answer given at start may no longer
-    # hold (a repository made around the folder while the audit ran, say).
-    reason = report_file.refusal(args.report)
-    if reason is not None:
-        _notice(f"{prog}: --report: {reason}")
-        return audit_report.EXIT_USAGE
-    try:
-        report_file.write_atomically(args.report, text.encode("utf-8"))
-    except OSError as error:
-        _notice(
-            f"{prog}: cannot write the report {args.report}: {error.strerror or error}"
-        )
+    text = _render(args, audit)
+    delivered = report_file.deliver_report(
+        text, args.report, prog=prog, out=sys.stdout, notice=_notice
+    )
+    if not delivered:
         return audit_report.EXIT_USAGE
     return audit_report.exit_code(audit)
 
@@ -459,8 +419,8 @@ def main(argv: Sequence[str] | None = None, *, wiring: Wiring | None = None) -> 
     stdio_utf8.force_utf8_streams(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args(argv)
-    refuse_bad_report(parser, args)
-    refusal = refuse_html_to_stdout(args)
+    report_file.refuse_bad_report(parser, args)
+    refusal = report_file.refuse_html_to_stdout(args)
     if refusal is not None:
         _notice(f"{parser.prog}: {refusal}")
         return audit_report.EXIT_USAGE

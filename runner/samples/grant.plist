@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>local.apple-music-toolbox.runner.grant</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>&lt;home&gt;/Library/Application Support/apple_music_toolbox/runner/Apple Music Toolbox Runner.app/Contents/MacOS/runner</string>
+		<string>--python</string>
+		<string>&lt;venv&gt;/bin/python</string>
+		<string>--script</string>
+		<string>&lt;checkout&gt;/runner/grant_probe/grant_probe.py</string>
+		<string>--</string>
+		<string>--result</string>
+		<string>&lt;home&gt;/Library/Application Support/apple_music_toolbox/runner/grant/result.json</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>&lt;home&gt;/Library/Application Support/apple_music_toolbox/runner/logs/grant.err.log</string>
+</dict>
+</plist>

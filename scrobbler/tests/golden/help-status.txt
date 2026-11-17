@@ -1,0 +1,15 @@
+usage: scrobbler status [-h] [--session-check]
+
+report the scrobbler's health
+
+options:
+  -h, --help       show this help message and exit
+  --session-check  print one line per problem and nothing when healthy; always
+                   exit 0 (default: False)
+
+Prerequisites: the Python release requires-python names in the project's
+pyproject.toml, and macOS 14 or later. build and install need the Swift
+toolchain and codesign; build --sign and install need a signing identity in
+the signing setting file layout.json names, outside every checkout. Run
+install from the repository's main checkout, never a linked worktree; see
+scrobbler.md.

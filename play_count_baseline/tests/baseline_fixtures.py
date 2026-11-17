@@ -61,21 +61,38 @@ def completed(
     return subprocess.CompletedProcess(["osascript"], returncode, stdout, stderr)
 
 
+#: What the script's ``escapedText`` writes for each character it escapes: a percent
+#: sign and the character's two uppercase hex digits. Every other character is kept.
+_ESCAPED = {char: f"%{ord(char):02X}" for char in "%\x1f\t\n\r"}
+
+
+def escape_field(text: str) -> str:
+    """*text* with each character the script escapes replaced by its escape.
+
+    Character by character: a reference the parser must undo. It is not a model of
+    the script's ``escapedText``, which leaves a percent sign fused with a following
+    combining mark as it is; the parser reads either form the same. What the handler
+    really writes is shown by running it, in tag_refresh's
+    ``tests/test_script_text_osascript.py``.
+    """
+    return "".join(_ESCAPED.get(char, char) for char in text)
+
+
 def row_of(track: baseline_rows.RawTrack) -> str:
     """The listing row Music would print for *track*, its linefeed included."""
     fields = (
         track.persistent_id,
-        track.name,
-        track.artist,
-        track.album,
-        track.album_artist,
+        escape_field(track.name),
+        escape_field(track.artist),
+        escape_field(track.album),
+        escape_field(track.album_artist),
         str(track.disc_number),
         "" if track.duration_ms is None else str(track.duration_ms),
         str(track.played_count),
         track.played_date,
-        track.genre,
+        escape_field(track.genre),
         str(track.year),
-        track.path,
+        escape_field(track.path),
     )
     return "\t".join(fields) + "\n"
 

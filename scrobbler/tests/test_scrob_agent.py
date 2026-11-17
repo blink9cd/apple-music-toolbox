@@ -8,6 +8,7 @@ writes when it bootstraps the agent.
 from __future__ import annotations
 
 import dataclasses
+import os
 import plistlib
 import stat
 import sys
@@ -21,8 +22,14 @@ import _scrob_fixtures as fx  # noqa: E402 - import follows the sys.path bootstr
 import scrob_agent  # noqa: E402 - on sys.path once _scrob_fixtures is imported
 import scrob_bundle  # noqa: E402 - on sys.path once _scrob_fixtures is imported
 
+if sys.platform == "win32":
+    # POSIX only, as the scrobbler is; also lets the win32 type-check skip os.geteuid.
+    raise unittest.SkipTest("the scrobbler runs on macOS only")  # pragma: only-on win32
+
 #: The bytes an earlier install left as the app's executable.
 _OLD_BYTES = b"the earlier install\n"
+#: The work folders an install that died left, as the sweep must find them.
+_DEAD_WORK = (f".staging-{fx.DEAD_PID}", f".old-{fx.DEAD_PID}-x")
 #: The swap itself, kept before each test logs it.
 _REAL_SWAP = scrob_agent.swap_in
 
@@ -34,9 +41,9 @@ class AgentCase(unittest.TestCase):
         self.kit = fx.make_kit(self)
         self.kit.write_identity()
 
-        def logged_swap(staged: Path, final: Path, aside: Path) -> None:
+        def logged_swap(staged: Path, final: Path) -> None:
             self.kit.log.append("swap")
-            _REAL_SWAP(staged, final, aside)
+            _REAL_SWAP(staged, final)
 
         patcher = mock.patch.object(scrob_agent, "swap_in", logged_swap)
         patcher.start()
@@ -71,27 +78,6 @@ class InstallRefusalTest(AgentCase):
         self.kit.tools.repos.clear()
         self.app_starts()
         self.assertEqual(self.install(), 0)
-
-    def test_a_git_that_cannot_run_is_refused(self) -> None:
-        self.kit.tools.missing.add("git")
-        with self.assertRaises(scrob_bundle.Refused) as caught:
-            self.install()
-        self.assertIn("could not ask git", str(caught.exception))
-
-    def test_a_git_that_fails_otherwise_is_refused(self) -> None:
-        self.kit.tools.git_dir = ""
-        self.kit.tools.common_dir = ""
-        original = self.kit.tools._git
-
-        def failing(args: list[str], cwd: Path) -> fx.subprocess.CompletedProcess[str]:
-            if "--git-common-dir" in args:
-                return fx.done(args, 128, err="fatal: invented unsafe repository\n")
-            return original(args, cwd)
-
-        self.kit.tools._git = failing  # type: ignore[method-assign]
-        with self.assertRaises(scrob_bundle.Refused) as caught:
-            self.install()
-        self.assertIn("could not say", str(caught.exception))
 
     def test_no_signing_setting_is_refused_before_building(self) -> None:
         self.kit.paths.signing_config.unlink()
@@ -149,7 +135,7 @@ class InstallOrderTest(AgentCase):
         names = sorted(path.name for path in self.kit.paths.data_dir.iterdir())
         # The scratch folder stays: it is SwiftPM's incremental build cache.
         self.assertEqual(
-            names, [".scratch", "listensmith scrobbler.app", "logs", "state"]
+            names, [".scratch", "Listensmith Scrobbler.app", "logs", "state"]
         )
 
     def test_the_plist_runs_the_installed_app_from_the_data_folder(self) -> None:
@@ -165,11 +151,47 @@ class InstallOrderTest(AgentCase):
         self.assertEqual(plist["EnvironmentVariables"], {"PATH": "/usr/bin:/bin"})
         self.assertTrue(paths.logs_dir.is_dir())
 
+    def test_the_agent_is_restarted_only_after_a_failed_exit(self) -> None:
+        # The app exits 0 on a refusal no restart can cure, and launchd leaves it stopped;
+        # a crash or a nonzero exit is restarted, at most once every throttle interval.
+        self.app_starts()
+        self.install()
+        plist = plistlib.loads(self.kit.paths.launch_agent_plist.read_bytes())
+        self.assertEqual(plist["KeepAlive"], {"SuccessfulExit": False})
+        self.assertEqual(plist["ThrottleInterval"], 10)
+
     def test_the_identity_is_never_shown(self) -> None:
         self.app_starts()
         self.install()
         for secret in (fx.FAKE_IDENTITY, fx.FAKE_NAME, fx.FAKE_TEAM):
             self.assertNotIn(secret, self.kit.output())
+
+
+class InstallMessageTest(AgentCase):
+    """What a finished install says about the Automation prompt."""
+
+    def test_no_request_in_flight_says_both_moments_the_prompt_can_come(self) -> None:
+        self.app_starts()
+        self.assertEqual(self.install(), 0)
+        said = self.kit.out.getvalue()
+        self.assertIn("at once when Music.app is running as the app starts", said)
+        self.assertIn("otherwise at the first play, pause or track change", said)
+        self.assertIn("whether Listensmith Scrobbler may control Music", said)
+        self.assertNotIn("in flight", said)
+
+    def test_a_request_in_flight_is_said_so_whatever_its_age(self) -> None:
+        # The app's first status already carries its request, begun a moment ago: far
+        # under the wait `status` calls too long, and the install says so all the same.
+        self.kit.launchd.on_bootstrap = lambda: self.kit.write_status(
+            started_at=self.kit.clock.wall + 1,
+            automation_asked_at=self.kit.clock.wall + 1,
+        )
+        self.assertEqual(self.install(), 0)
+        said = self.kit.out.getvalue()
+        self.assertIn("request for Automation of Music is in flight", said)
+        self.assertIn("whether Listensmith Scrobbler may control Music", said)
+        self.assertIn("allow it", said)
+        self.assertNotIn("otherwise at the first play", said)
 
 
 class InstallFailureTest(AgentCase):
@@ -231,16 +253,6 @@ class InstallFailureTest(AgentCase):
         self.kit.host = dataclasses.replace(self.kit.host, sleep=sleep_then_start)
         self.assertEqual(self.install(), 0)
 
-    def test_a_failed_rename_puts_the_old_bundle_back(self) -> None:
-        final = self.kit.home / "final.app"
-        final.mkdir()
-        aside = self.kit.home / "aside.app"
-        staged = self.kit.home / "absent.app"
-        with self.assertRaises(OSError):
-            _REAL_SWAP(staged, final, aside)
-        self.assertTrue(final.is_dir())
-        self.assertFalse(aside.exists())
-
     def test_a_swap_that_cannot_rename_is_build_failed(self) -> None:
         self.app_starts()
         with mock.patch.object(Path, "rename", side_effect=PermissionError("invented")):
@@ -285,35 +297,61 @@ class ReplaceSafetyTest(AgentCase):
 
     def test_a_failed_swap_keeps_the_plist_so_status_sees_the_install(self) -> None:
         self.kit.install_app()
-        with mock.patch.object(Path, "rename", side_effect=PermissionError("invented")):
-            with self.assertRaises(scrob_bundle.BuildFailed):
+        refused = PermissionError(13, "Permission denied", "invented")
+        with mock.patch.object(scrob_agent, "swap_in", side_effect=refused):
+            with self.assertRaises(scrob_bundle.BuildFailed) as caught:
                 self.install()
+        self.assertIn("PermissionError", str(caught.exception))
         self.assertTrue(self.kit.paths.launch_agent_plist.is_file())
+        self.assertFalse((self.kit.paths.data_dir / f".staging-{fx.PID}").exists())
 
     def test_an_old_bundle_that_cannot_be_removed_is_its_own_message(self) -> None:
         self.kit.install_app()
+        self.executable().write_bytes(_OLD_BYTES)
         self.app_starts()
         real_rmtree = scrob_agent.shutil.rmtree
+        staging = self.kit.paths.data_dir / f".staging-{fx.PID}"
 
-        def refuse_the_aside(path: Path, ignore_errors: bool = False) -> None:
-            if Path(path).name.startswith(".old-"):
+        def refuse_the_staging(path: Path, ignore_errors: bool = False) -> None:
+            # Only the removal after a swap that worked: it is the one not ignoring errors.
+            if Path(path) == staging and not ignore_errors:
                 raise PermissionError("invented")
             real_rmtree(path, ignore_errors=ignore_errors)
 
-        with mock.patch.object(scrob_agent.shutil, "rmtree", refuse_the_aside):
+        with mock.patch.object(scrob_agent.shutil, "rmtree", refuse_the_staging):
             self.assertEqual(self.install(), 0)
         self.assertEqual(self.executable().read_bytes(), fx.BUILT_BYTES)
-        self.assertIn("could not remove the old app", self.kit.err.getvalue())
+        (warning,) = self.kit.err.getvalue().splitlines()
+        self.assertIn("could not remove the old app", warning)
+        self.assertIn(str(staging), warning)
 
-    def test_a_stale_aside_folder_from_a_recycled_pid_is_replaced(self) -> None:
+    def test_the_swap_never_renames_the_running_app_away(self) -> None:
+        # The regression: the earlier swap renamed the app aside first, so a kill between
+        # its two renames left no app at the path the agent runs.
         self.kit.install_app()
-        layout = self.kit.layout
-        stale = self.kit.paths.data_dir / f".old-{fx.PID}-{layout.app_name}" / "x"
-        stale.mkdir(parents=True)
+        self.executable().write_bytes(_OLD_BYTES)
         self.app_starts()
-        self.assertEqual(self.install(), 0)
-        self.assertFalse(stale.parent.exists())
+        app = self.kit.paths.app_bundle
+        real_rename = Path.rename
+
+        def rename(path: Path, target: Path) -> Path:
+            self.assertNotEqual(Path(path), app, "the installed app was renamed away")
+            return real_rename(path, target)
+
+        with mock.patch.object(Path, "rename", rename):
+            self.assertEqual(self.install(), 0)
         self.assertEqual(self.executable().read_bytes(), fx.BUILT_BYTES)
+
+    def test_a_dead_install_s_work_folders_are_swept_before_staging(self) -> None:
+        self.kit.install_app()
+        left = [self.kit.paths.data_dir / name for name in _DEAD_WORK]
+        for folder in left:
+            (folder / "x").mkdir(parents=True)
+        # Swept even when the build then fails: the sweep comes first.
+        self.kit.tools.verify_rc = 1
+        with self.assertRaises(scrob_bundle.BuildFailed):
+            self.install()
+        self.assertFalse(any(folder.exists() for folder in left))
 
     def test_a_symlinked_data_folder_is_refused(self) -> None:
         elsewhere = self.kit.home.parent / "elsewhere"
@@ -325,6 +363,17 @@ class ReplaceSafetyTest(AgentCase):
             self.install()
         self.assertIn("symbolic link", str(caught.exception))
         self.assertEqual(stat.S_IMODE(elsewhere.stat().st_mode), 0o755)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a folder whatever its mode")
+    def test_an_unreadable_data_folder_is_refused_naming_it(self) -> None:
+        self.kit.paths.data_dir.mkdir(parents=True)
+        self.kit.paths.data_dir.chmod(0o000)
+        # Restored before the temporary root is removed, which needs to list it.
+        self.addCleanup(self.kit.paths.data_dir.chmod, 0o700)
+        with self.assertRaises(scrob_bundle.Refused) as caught:
+            self.install()
+        self.assertIn(str(self.kit.paths.data_dir), str(caught.exception))
+        self.assertIn("cannot be read", str(caught.exception))
 
     def test_a_symlinked_state_folder_is_refused_before_the_old_app_is_touched(
         self,

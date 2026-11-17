@@ -55,11 +55,6 @@ import phone_report  # noqa: E402 - import follows the sys.path bootstrap above
 import report_file  # noqa: E402 - import follows the sys.path bootstrap above
 import stdio_utf8  # noqa: E402 - import follows the sys.path bootstrap above
 
-#: The three report formats. HTML goes to a file only (``--report``), and no format is
-#: ever inferred from the report's name.
-FORMAT_TEXT, FORMAT_JSON, FORMAT_HTML = "text", "json", "html"
-#: The refusal of ``--format html`` with no ``--report``.
-HTML_NEEDS_REPORT = "--format html needs --report: the page is written to a file only"
 #: The binary this tool runs, looked up on PATH.
 AFCCLIENT = "afcclient"
 #: The folder holding the phone's ``Fnn`` sync folders, relative to the AFC root (the
@@ -92,22 +87,6 @@ def real_wiring() -> Wiring:
 
 
 # --- The options ---------------------------------------------------------------------
-
-
-class _HelpFormatter(
-    help_formatter.ReqAwareDefaultsFormatter, argparse.RawDescriptionHelpFormatter
-):
-    """Every real default shown, the epilog's breaks kept.
-
-    A default of None is no value a person could type, so it is not shown: each such
-    option's help says instead what leaving it out means.
-    """
-
-    def _get_help_string(self, action: argparse.Action) -> str | None:
-        """*action*'s help, with its default appended unless that default is None."""
-        if action.default is None:
-            return action.help
-        return super()._get_help_string(action)
 
 
 _EPILOG = f"""\
@@ -154,17 +133,21 @@ def _udid(text: str) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The CLI: every argument a named option, every real default shown."""
+    """The CLI: every argument a named option, every real default shown.
+
+    The formatter hides a None default: no one types it, so each such option's help
+    says instead what leaving it out means.
+    """
     parser = argparse.ArgumentParser(
         description="Find the iPhone's synced tracks that have no file on the phone, "
         "or a file of the wrong size. Read-only.",
-        formatter_class=_HelpFormatter,
+        formatter_class=help_formatter.RawNoneHidingFormatter,
         epilog=_EPILOG,
     )
     parser.add_argument(
         "--format",
-        choices=(FORMAT_TEXT, FORMAT_JSON, FORMAT_HTML),
-        default=FORMAT_TEXT,
+        choices=report_file.FORMATS,
+        default=report_file.FORMAT_TEXT,
         help="The report's form; html needs --report, and is never inferred from it.",
     )
     parser.add_argument(
@@ -182,24 +165,6 @@ def build_parser() -> argparse.ArgumentParser:
         "reads the only one.",
     )
     return parser
-
-
-def refuse_bad_report(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> None:
-    """Exit 2 through *parser* when ``--report`` cannot be written, before any work."""
-    if args.report is None:
-        return
-    reason = report_file.refusal(args.report)
-    if reason is not None:
-        parser.error(f"--report: {reason}")
-
-
-def refuse_html_to_stdout(args: argparse.Namespace) -> str | None:
-    """Why the options cannot run, when ``--format html`` names no ``--report``."""
-    if args.format == FORMAT_HTML and args.report is None:
-        return HTML_NEEDS_REPORT
-    return None
 
 
 # --- Output --------------------------------------------------------------------------
@@ -314,9 +279,9 @@ def _render(
     args: argparse.Namespace, audit: phone_report.Audit, read_at: datetime
 ) -> str:
     """The report in its format; the HTML page says the phone was read at *read_at*."""
-    if args.format == FORMAT_JSON:
+    if args.format == report_file.FORMAT_JSON:
         return phone_report.format_json(audit)
-    if args.format == FORMAT_HTML:
+    if args.format == report_file.FORMAT_HTML:
         return phone_html.format_html(phone_report.report_dict(audit), read_at=read_at)
     return phone_report.format_text(audit)
 
@@ -326,21 +291,10 @@ def _deliver(
 ) -> int:
     """Print or write the report in its format; return the run's exit code."""
     text = _render(args, audit, read_at)
-    if args.report is None:
-        print(text, end="")
-        return phone_report.exit_code(audit)
-    # Asked again at the moment of writing: the answer given at start may no longer
-    # hold (a repository made around the folder while the run went on, say).
-    reason = report_file.refusal(args.report)
-    if reason is not None:
-        _notice(f"{prog}: --report: {reason}")
-        return phone_report.EXIT_USAGE
-    try:
-        report_file.write_atomically(args.report, text.encode("utf-8"))
-    except OSError as error:
-        _notice(
-            f"{prog}: cannot write the report {args.report}: {error.strerror or error}"
-        )
+    delivered = report_file.deliver_report(
+        text, args.report, prog=prog, out=sys.stdout, notice=_notice
+    )
+    if not delivered:
         return phone_report.EXIT_USAGE
     return phone_report.exit_code(audit)
 
@@ -353,8 +307,8 @@ def main(argv: Sequence[str] | None = None, *, wiring: Wiring | None = None) -> 
     stdio_utf8.force_utf8_streams(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args(argv)
-    refuse_bad_report(parser, args)
-    refusal = refuse_html_to_stdout(args)
+    report_file.refuse_bad_report(parser, args)
+    refusal = report_file.refuse_html_to_stdout(args)
     if refusal is not None:
         _notice(f"{parser.prog}: {refusal}")
         return phone_report.EXIT_USAGE

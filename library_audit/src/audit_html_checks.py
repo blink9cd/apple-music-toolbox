@@ -14,19 +14,15 @@ companion doc's JSON table; the accessors here narrow their ``object`` values wi
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import cast
 
 from audit_checks import missing_ranges
 from html_page import Cell, Row, escaped
+from report_html import DASH, Item, item_of, number_cell, text_cell
 
-#: One listed item of the report, as `report_dict` builds it.
-Item = Mapping[str, object]
-
-#: What a cell with no value shows: the names of a folder group, say.
-_DASH = "—"
 #: The range joiner on the page: ``2–4``, an en dash, where the text report has ``-``.
 _EN_DASH = "–"
 #: What a track with no location shows, as in the text report.
@@ -36,16 +32,6 @@ _NONE = "none"
 
 
 # --- Cells ---------------------------------------------------------------------------
-
-
-def _text(value: object) -> Cell:
-    """A text cell; None reads as a dash."""
-    return Cell(_DASH if value is None else escaped(value))
-
-
-def _number(value: object) -> Cell:
-    """A number cell, set in even-width figures; None reads as a dash."""
-    return Cell(_DASH) if value is None else Cell(escaped(value), numeric=True)
 
 
 def _ranges(numbers: object) -> str:
@@ -66,12 +52,7 @@ def _where(path: object, library: str) -> Cell:
     """A path cell: relative to the library when under it; no location when empty."""
     if not path:
         return Cell(_NO_LOCATION)
-    return _text(_shown_path(path, library))
-
-
-def _item(value: object) -> Item:
-    """One listed item of the report, as `report_dict` built it."""
-    return cast("Item", value)
+    return text_cell(_shown_path(path, library))
 
 
 # --- Each check's row ----------------------------------------------------------------
@@ -84,43 +65,43 @@ def _path_row(value: object, library: str) -> Row:
 
 def _reason_row(value: object, library: str) -> Row:
     """A path and why it failed."""
-    item = _item(value)
-    return (_where(item["path"], library), _text(item["reason"]))
+    item = item_of(value)
+    return (_where(item["path"], library), text_cell(item["reason"]))
 
 
 def _gone_row(value: object, library: str) -> Row:
     """A gone track: who, which album, disc and track, its cloud status, and where."""
-    item = _item(value)
+    item = item_of(value)
     return (
         *_unchecked_row(item, library)[:4],
-        _text(item["cloud_status"]),
+        text_cell(item["cloud_status"]),
         _where(item["location"], library),
     )
 
 
 def _unchecked_row(value: object, library: str) -> Row:
     """A listed track: who, which album, disc and track, and where."""
-    item = _item(value)
+    item = item_of(value)
     return (
-        _text(item["artist"]),
-        _text(item["album"]),
-        _number(item["disc"]),
-        _number(item["track"]),
+        text_cell(item["artist"]),
+        text_cell(item["album"]),
+        number_cell(item["disc"]),
+        number_cell(item["track"]),
         _where(item["location"], library),
     )
 
 
 def _gap_row(value: object, _library: str) -> Row:
     """A gap: the group, the numbers it lacks, its files and its count tag."""
-    item = _item(value)
+    item = item_of(value)
     count = item["track_count"]
     return (
-        _text(item["artist"]),
-        _text(item["album"]),
-        _number(item["disc"]),
+        text_cell(item["artist"]),
+        text_cell(item["album"]),
+        number_cell(item["disc"]),
         Cell(_ranges(item["missing"])),
-        _number(item["files"]),
-        Cell(_NONE) if count is None else _number(count),
+        number_cell(item["files"]),
+        Cell(_NONE) if count is None else number_cell(count),
     )
 
 
@@ -143,17 +124,17 @@ def _differs_markup(differs: Sequence[Item]) -> str:
         for name in ("artist", "album")
         if (note := d[name]) is not None
     ]
-    return f'<ul class="differs">{"".join(lines)}</ul>' if lines else _DASH
+    return f'<ul class="differs">{"".join(lines)}</ul>' if lines else DASH
 
 
 def _split_row(value: object, _library: str) -> Row:
     """A split album: its first spelling, disc, every spelling, how they differ."""
-    item = _item(value)
+    item = item_of(value)
     spellings = cast("list[Item]", item["spellings"])
     return (
-        _text(spellings[0]["artist"]),
-        _text(spellings[0]["album"]),
-        _number(item["disc"]),
+        text_cell(spellings[0]["artist"]),
+        text_cell(spellings[0]["album"]),
+        number_cell(item["disc"]),
         Cell(f"<ol>{''.join(map(_spelling_markup, spellings))}</ol>"),
         Cell(_differs_markup(cast("list[Item]", item["differs"]))),
         Cell(_ranges(item["still_missing"])),
@@ -162,25 +143,25 @@ def _split_row(value: object, _library: str) -> Row:
 
 def _count_row(value: object, library: str) -> Row:
     """A group whose files and tracks differ: its names, or its folder, and both counts."""
-    item = _item(value)
+    item = item_of(value)
     folder = item["folder"]
     return (
-        _text(item["artist"]),
-        _text(item["album"]),
-        _number(item["disc"]),
-        _text(None if folder is None else _shown_path(folder, library)),
-        _number(item["files"]),
-        _number(item["tracks"]),
+        text_cell(item["artist"]),
+        text_cell(item["album"]),
+        number_cell(item["disc"]),
+        text_cell(None if folder is None else _shown_path(folder, library)),
+        number_cell(item["files"]),
+        number_cell(item["tracks"]),
     )
 
 
 def _size_row(value: object, library: str) -> Row:
     """A size out of step: the file, and the two sizes."""
-    item = _item(value)
+    item = item_of(value)
     return (
         _where(item["path"], library),
-        _number(item["music_size"]),
-        _number(item["file_size"]),
+        number_cell(item["music_size"]),
+        number_cell(item["file_size"]),
     )
 
 

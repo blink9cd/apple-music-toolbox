@@ -8,7 +8,9 @@ opt-in sign stage (:data:`FINISH`) takes that verdict and returns the package's 
 it signs only a package that passed, and only when ``--sign`` put a setting on the
 options.
 
-A stage that cannot even ask its question raises (``ParseError``, ``FileNotFoundError``:
+A stage that cannot even ask its question raises (``ParseError``,
+:class:`SwiftLaunchError` for a ``swift`` that cannot be launched, :class:`ScratchError`
+for a scratch dir that cannot be created or cleared, or any other ``OSError`` as itself:
 exit 2 at the caller); a stage that got an answer it did not like either returns a
 terminal result (a failed build or test run) or records a finding and lets the pipeline
 continue, so one run reports a manifest finding and the coverage shortfall together.
@@ -44,8 +46,9 @@ from swgate_model import (
     NotConfigured,
     RunFn,
     Subject,
+    os_reason,
 )
-from swgate_signing import redact, render_identity, render_path
+from swgate_signing import home_or_default, redact, render_identity, render_path
 from swgate_subject import MANIFEST, package_sources
 
 _SCRATCH_DIRNAME = "swift_gate"
@@ -79,6 +82,48 @@ def scratch_for(package: Path, base: Path) -> Path:
     return base / digest[:_SCRATCH_HASH_CHARS]
 
 
+class ScratchError(Exception):
+    """The package's scratch dir could not be created or cleared; carries the OS error.
+
+    Its own type, not an ``OSError``, so the caller's ``OSError`` handler can
+    never catch it: *action* names what failed (``create``, ``clear``) and *error* is the
+    original, whose text carries the absolute scratch path and is never shown.
+    """
+
+    def __init__(self, action: str, error: OSError) -> None:
+        """Record the failed action and the OS error behind it."""
+        super().__init__(action)
+        self.action = action
+        self.error = error
+
+
+def prepare_scratch(scratch: Path) -> None:
+    """Create *scratch* (and its base) before any ``swift`` call names it.
+
+    SwiftPM would create it itself, but a failure there would surface as a failed or
+    unlaunchable ``swift`` command; made here, it is reported as what it is.
+    """
+    try:
+        scratch.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ScratchError("create", exc) from exc
+
+
+class SwiftLaunchError(Exception):
+    """``swift`` itself could not be launched; carries the OS error behind it.
+
+    Raised only around the launch in :meth:`StageContext.swift`, so "could not run swift"
+    is said of the launch and nothing else: any other ``OSError`` a stage meets (the sign
+    stage's temp dir or copy, the coverage report's read) reaches the caller as itself.
+    Not an ``OSError``, so the caller's catch-all for those can never take it.
+    """
+
+    def __init__(self, error: OSError) -> None:
+        """Record the OS error the launch raised."""
+        super().__init__(type(error).__name__)
+        self.error = error
+
+
 class StageTimeout(Exception):
     """A stage's command outlived its per-call bound; carries the stage's name."""
 
@@ -99,7 +144,11 @@ class StageContext:
     codesign_run: RunFn
 
     def swift(self, stage: str, *args: str) -> subprocess.CompletedProcess[str]:
-        """Run ``swift <args>`` in the package, naming *stage* if it times out."""
+        """Run ``swift <args>`` in the package, naming *stage* if it times out.
+
+        An ``OSError`` from the launch (missing, not executable) is a
+        :class:`SwiftLaunchError`.
+        """
         try:
             return self.run(
                 [self.opts.swift, *args],
@@ -108,6 +157,8 @@ class StageContext:
             )
         except subprocess.TimeoutExpired as exc:
             raise StageTimeout(stage) from exc
+        except OSError as exc:
+            raise SwiftLaunchError(exc) from exc
 
     def codesign(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         """Run ``codesign <args>`` in *cwd*, naming the sign stage if it times out."""
@@ -175,6 +226,15 @@ def build_stage(ctx: StageContext, progress: Progress) -> GateResult | None:
     )
 
 
+def _clear_stale_reports(scratch: Path) -> None:
+    """Delete every earlier coverage report under *scratch*; a failure is a ScratchError."""
+    try:
+        for stale in scratch.rglob(_CODECOV_GLOB):
+            stale.unlink()
+    except OSError as exc:
+        raise ScratchError("clear", exc) from exc
+
+
 def swift_test_stage(ctx: StageContext, progress: Progress) -> GateResult | None:
     """Run the tests on the built products, then ask SwiftPM where the report went.
 
@@ -182,8 +242,7 @@ def swift_test_stage(ctx: StageContext, progress: Progress) -> GateResult | None
     write no fresh report can never be measured against a stale one. The tests run
     serially (:data:`_SERIAL_FLAG`), because the counts they record are the verdict.
     """
-    for stale in ctx.scratch.rglob(_CODECOV_GLOB):
-        stale.unlink()
+    _clear_stale_reports(ctx.scratch)
     done = ctx.swift(
         "test",
         "test",
@@ -265,7 +324,7 @@ def sign_stage(
     if verdict.returncode != 0:
         return _noted(verdict, "signing: skipped, the gate already failed")
     if isinstance(setting, NotConfigured):
-        shown = render_path(setting.path, Path.home())
+        shown = render_path(setting.path, home_or_default(ctx.opts.home))
         return _noted(verdict, f"signing: not configured ({shown} absent)")
     if not progress.executables:
         return _noted(verdict, "signing: nothing to sign")
@@ -318,9 +377,12 @@ def _sign_one(ctx: StageContext, copy: Path, identity: str) -> tuple[int, str] |
         try:
             done = ctx.codesign(copy.parent, *args)
         except OSError as exc:
-            return 2, f"ERROR: could not run codesign: {exc}"
+            # The exception's own text names codesign's path, which may sit under the home.
+            return 2, f"ERROR: could not run codesign: {os_reason(exc)}"
         if done.returncode != 0:
-            output = redact(_output(done), identity, home=Path.home())
+            output = redact(
+                _output(done), identity, home=home_or_default(ctx.opts.home)
+            )
             return 1, (
                 f"signing: codesign {step} failed for {copy.name} "
                 f"(rc {done.returncode}):\n{output}"
@@ -352,13 +414,16 @@ def run_stages(
     """Gate one package through :data:`STAGES`; a timeout is exit 1 naming the stage.
 
     *codesign* is the seam ``codesign`` runs through; when omitted, *run* serves both,
-    since the two seams share one shape. The CLI passes its own.
+    since the two seams share one shape. The CLI passes its own. The scratch dir is made
+    first, so a scratch failure raises :class:`ScratchError` before any stage runs.
     """
+    scratch = scratch_for(subject.root, opts.scratch_base)
+    prepare_scratch(scratch)
     ctx = StageContext(
         subject,
         opts,
         run,
-        scratch_for(subject.root, opts.scratch_base),
+        scratch,
         codesign if codesign is not None else run,
     )
     progress = Progress()

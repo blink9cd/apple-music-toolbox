@@ -3,14 +3,27 @@
 Pure: nothing here talks to Music.app, runs a process, or prints. `parse_play_rows`
 reads what `baseline_calls.list_play_counts` returns and never raises on a bad row;
 it counts it, so the run can say its picture of the library is incomplete rather than
-write a baseline that silently lacks a track.
+write a baseline that silently lacks a track. The text fields and the path arrive
+escaped (see ``escapedText`` in `baseline_calls`), so a tab, line break, U+001F or
+percent sign inside one can neither split a row nor be lost; `unescape_field`, the
+shared decoder in tag_refresh's ``src/script_text.py``, reads each back after the
+row's shape is checked.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple
+
+#: tag_refresh's private modules, where the escape's one decoder lives: the sibling
+#: tool folder's ``src/``, the same fixed place `baseline_calls` reaches its seam in.
+_SEAM_DIR = Path(__file__).resolve().parents[2] / "tag_refresh" / "src"
+sys.path[:0] = [str(_SEAM_DIR)]
+
+from script_text import unescape_field  # noqa: E402 - follows the sys.path bootstrap
 
 #: The one row terminator. Never ``splitlines``, which also breaks on
 #: ``\v \f \x1c-\x1e \x85 U+2028 U+2029`` and so would split a name holding one.
@@ -93,17 +106,17 @@ def _track_of(segment: str) -> RawTrack | None:
     ) = found.groups()
     return RawTrack(
         persistent_id=pid,
-        name=name,
-        artist=artist,
-        album=album,
-        album_artist=album_artist,
+        name=unescape_field(name),
+        artist=unescape_field(artist),
+        album=unescape_field(album),
+        album_artist=unescape_field(album_artist),
         disc_number=int(disc),
         duration_ms=int(duration) if duration else None,
         played_count=int(count),
         played_date=date,
-        genre=genre,
+        genre=unescape_field(genre),
         year=int(year),
-        path=path,
+        path=unescape_field(path),
     )
 
 

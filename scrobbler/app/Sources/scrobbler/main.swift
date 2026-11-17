@@ -69,31 +69,36 @@ func tokenReader(paths: ScrobblerPaths) -> () throws(TokenError) -> String {
     }, end: { process.endActivity($0) })
 }
 
-/// The instance lock at `url`. Another copy holding it stops this one cleanly; a lock file
-/// that cannot be opened is a failure.
-func takeLock(at url: URL) -> InstanceLock {
-  switch InstanceLock.acquire(at: url) {
+/// The instance lock in the data folder of `paths`. Another copy holding it is a retry, so
+/// the launch agent starts its copy once that one stops; a lock file that cannot be opened,
+/// a link at the data folder included, is a refusal no restart can cure, so the agent
+/// leaves it stopped.
+func takeLock(in paths: ScrobblerPaths) -> InstanceLock {
+  switch InstanceLock.acquire(at: paths.lockFile, owning: paths.dataDir) {
   case .acquired(let lock):
     return lock
   case .held:
     complain("another scrobbler is already running")
-    exit(0)
+    exit(RunExit.retry)
   case .unopenable:
     complain("the instance lock file could not be opened")
-    exit(1)
+    exit(RunExit.refused)
   }
 }
 
-/// Run as the scrobbler until the process is stopped: one copy only, its folders private,
-/// the coordinator started once, then the main run loop.
+/// Run as the scrobbler until the process is stopped: its logs bounded, one copy only, its
+/// folders private, the coordinator started once, then the main run loop.
 @MainActor func runScrobbler() -> Never {
   let paths = ScrobblerPaths(home: FileManager.default.homeDirectoryForCurrentUser)
-  let lock = takeLock(at: paths.lockFile)
+  // First, so every start bounds the logs, a start that is about to fail included.
+  LogCap.trim(descriptor: STDERR_FILENO, path: paths.errLog)
+  LogCap.trim(descriptor: STDOUT_FILENO, path: paths.outLog)
+  let lock = takeLock(in: paths)
   do {
     try paths.makeDataFolders()
   } catch {
     complain("the data folders could not be made")
-    exit(1)
+    exit(RunExit.refused)
   }
   let coordinator = makeCoordinator(paths: paths)
   let hold = makeActivityHold()
@@ -105,7 +110,7 @@ func takeLock(at url: URL) -> InstanceLock {
   // The timers keep the run loop busy, so a return means it lost them: stop as a failure,
   // so the launch agent starts a fresh copy.
   complain("the run loop stopped")
-  exit(1)
+  exit(RunExit.retry)
 }
 
 switch CommandLineParser.parse(Array(CommandLine.arguments.dropFirst())) {

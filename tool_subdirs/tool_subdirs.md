@@ -171,6 +171,14 @@ only what runs. A suite is reached by exactly one of:
 
 - a call to any method named `discover` (`unittest.TestLoader.discover`, through any
   receiver), which reaches every suite;
+- a call to a method named `fold_selected` (`suite_select.fold_selected(...)`, through any
+  receiver), or a bare `fold_selected(...)` call, which reaches every suite too: a split
+  aggregator's `load_tests` returns it, and it discovers every `tests/test_*.py` itself, so
+  such an aggregator needs no `discover` call of its own. The match is by name
+  alone: neither the import nor the receiver is verified, and only a call counts, never a
+  binding or a string that mentions it. An aliased import (`from suite_select import
+  fold_selected as fs`, then `fs(...)`) does not count, so its suites are reported as
+  unreached: a loud miss, never a silent pass;
 - a **star** import of its module — `from test_x import *` or `from tests.test_x import *`
   — which binds the suite's `TestCase` classes into the aggregator's namespace, where
   unittest's module load finds them;
@@ -189,10 +197,10 @@ cannot **read** (not UTF-8, unreadable, a broken link) reaches nothing too:
 catches `OSError` and `UnicodeDecodeError` to ask it instead of raising a traceback.
 
 **What this does not prove.** The check is a static read of the source. It does not confirm
-that a `discover` call targets `tests/` rather than some other directory, and an import or a
-`load_tests` counts wherever it is written — under `if False:` or inside a function nothing
-ever calls — exactly as if it ran. It closes the shape that bit (an aggregator that never
-mentions its suites), not every way an aggregator can fail to run them.
+that a `discover` or `fold_selected` call targets `tests/` rather than some other directory,
+and an import or a `load_tests` counts wherever it is written — under `if False:` or inside
+a function nothing ever calls — exactly as if it ran. It closes the shape that bit (an
+aggregator that never mentions its suites), not every way an aggregator can fail to run them.
 
 It exists because the file's existence was once the whole check. An aggregator holding only
 its own tests passed it, and a regression test filed in the `tests/` beside it never ran
@@ -261,7 +269,7 @@ silent one would be worse than a crash.
 | `aggregator_filename(folder)` | The `test_<folder>.py`; folds `-` to `_`. |
 | `primary_script_filename(folder, dir_name)` | `<folder>.sh` for `lib`, `<folder>.py` for `src`; `ValueError` otherwise. |
 | `suite_orphan_reason(folder, parent_filenames)` | One-line reason the aggregator is absent, else `None`. |
-| `unreached_suites(aggregator_source, suite_filenames)` | The `test_*.py` the source does not run (discover, star import, or import + `load_tests`), sorted. |
+| `unreached_suites(aggregator_source, suite_filenames)` | The `test_*.py` the source does not run (discover, `fold_selected`, star import, or import + `load_tests`), sorted. |
 | `unreadable_aggregator_reason(folder, error, suite_filenames)` | One-line reason naming the read failure and every suite, else `None`. |
 | `suite_reach_reason(folder, aggregator_source, suite_filenames)` | One-line reason naming every unreached suite, else `None`. |
 | `private_orphan_reason(dir_name, folder, parent_filenames)` | One-line reason, else `None`. |

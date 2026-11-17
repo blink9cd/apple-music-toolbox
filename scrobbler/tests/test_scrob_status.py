@@ -313,6 +313,17 @@ class HostileStatusFileTest(StatusCase):
         os.mkfifo(self.kit.paths.status_file)
         self.assert_one_line_reason("not a regular file")
 
+    def test_a_symlink_to_a_healthy_file_is_refused(self) -> None:
+        elsewhere = self.kit.home / "elsewhere.json"
+        self.kit.paths.status_file.rename(elsewhere)
+        self.kit.paths.status_file.symlink_to(elsewhere)
+        self.assert_one_line_reason("symbolic link", "not a regular file")
+
+    def test_a_dangling_symlink_is_refused_not_missing(self) -> None:
+        self.kit.paths.status_file.unlink()
+        self.kit.paths.status_file.symlink_to(self.kit.home / "missing.json")
+        self.assert_one_line_reason("symbolic link")
+
     def healthy(self) -> dict[str, object]:
         """The healthy document the kit wrote."""
         text = self.kit.paths.status_file.read_text(encoding="utf-8")
@@ -323,7 +334,7 @@ class HostileStatusFileTest(StatusCase):
 class ShownTextTest(StatusCase):
     """Text from status.json cannot forge a line or reach the terminal as a control."""
 
-    _FORGED = "\nlistensmith scrobbler: HEALTHY (exit 0)\x1b[2J"
+    _FORGED = "\nListensmith Scrobbler: HEALTHY (exit 0)\x1b[2J"
 
     def test_a_newline_or_escape_forges_no_line(self) -> None:
         self.kit.write_status(
@@ -335,7 +346,7 @@ class ShownTextTest(StatusCase):
         self.assertEqual(len(sessions), 1)
         for line in [*lines, *sessions]:
             self.assertTrue(all(c.isprintable() for c in line), repr(line))
-        verdicts = [line for line in lines if line.startswith("listensmith scrobbler:")]
+        verdicts = [line for line in lines if line.startswith("Listensmith Scrobbler:")]
         self.assertEqual(len(verdicts), 1)
 
     def test_long_text_is_cut_to_120_characters(self) -> None:
@@ -345,25 +356,32 @@ class ShownTextTest(StatusCase):
         self.assertTrue(shown.endswith("…"))
 
 
+class StemTest(unittest.TestCase):
+    """Every line the scrobbler prints about itself opens with its display name."""
+
+    def test_the_stem_is_the_display_name(self) -> None:
+        self.assertEqual(scrob_status.STEM, fx.scrob_layout.load_layout().display_name)
+
+
 class FormatTest(StatusCase):
     """The printed verdict, reasons and table."""
 
     def test_a_healthy_report_prints_its_verdict_and_table(self) -> None:
         lines = scrob_status.format_lines(self.report())
-        self.assertEqual(lines[0], "listensmith scrobbler: HEALTHY (exit 0)")
+        self.assertEqual(lines[0], "Listensmith Scrobbler: HEALTHY (exit 0)")
         self.assertEqual(lines[1:4], ["", "| Item | State |", "| --- | --- |"])
         self.assertIn("| backlog | 0 |", lines)
 
     def test_each_reason_is_one_line_under_the_verdict(self) -> None:
         self.kit.write_status(automation_denied=True)
         lines = scrob_status.format_lines(self.report())
-        self.assertEqual(lines[0], "listensmith scrobbler: NEEDS ATTENTION (exit 1)")
+        self.assertEqual(lines[0], "Listensmith Scrobbler: NEEDS ATTENTION (exit 1)")
         self.assertTrue(lines[1].startswith("- needs attention: "), lines[1])
 
     def test_cannot_judge_prints_its_verdict(self) -> None:
         self.kit.paths.launch_agent_plist.unlink()
         lines = scrob_status.format_lines(self.report())
-        self.assertEqual(lines[0], "listensmith scrobbler: CANNOT JUDGE (exit 2)")
+        self.assertEqual(lines[0], "Listensmith Scrobbler: CANNOT JUDGE (exit 2)")
 
 
 class SessionCheckTest(StatusCase):
@@ -384,7 +402,7 @@ class SessionCheckTest(StatusCase):
     def test_each_reason_is_one_line_with_the_home_redacted(self) -> None:
         self.kit.write_status(refused_count=3)
         (line,) = self.lines()
-        self.assertTrue(line.startswith("listensmith scrobbler: needs attention -- "))
+        self.assertTrue(line.startswith("Listensmith Scrobbler: needs attention -- "))
         self.assertTrue(line.endswith("; details: scrobbler.py status"), line)
         self.assertIn("$HOME/Library/Application Support", line)
         self.assertNotIn(str(self.kit.home), line)
@@ -396,7 +414,7 @@ class SessionCheckTest(StatusCase):
             lines = self.lines()
         self.assertEqual(
             lines,
-            ["listensmith scrobbler: session check failed -- unexpected RuntimeError"],
+            ["Listensmith Scrobbler: session check failed -- unexpected RuntimeError"],
         )
 
     def test_every_call_is_clamped_to_the_budget(self) -> None:

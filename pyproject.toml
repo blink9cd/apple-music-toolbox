@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apple-music-toolbox"
-version = "0.3.0"
+version = "0.4.0"
 description = "Tools for Apple Music on macOS: what was added most recently, an album's favorites, making Music.app reread changed tags, auditing a library folder and a synced iPhone for missing files, a scrobbler that records what Music.app plays, and a play-count baseline of the whole library"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -135,6 +135,20 @@ mypy_path = [
   "$MYPY_CONFIG_FILE_DIR/phone_audit/src",
   # The scrobbler's private src/, which its entry point and its suites put on sys.path.
   "$MYPY_CONFIG_FILE_DIR/scrobbler/src",
+  # signed_app's front module, which the scrobbler and the runner import, and the src/
+  # it puts on sys.path at runtime where mypy cannot see it: the generic build, sign and
+  # install steps both apps' modules call.
+  "$MYPY_CONFIG_FILE_DIR/signed_app",
+  "$MYPY_CONFIG_FILE_DIR/signed_app/src",
+  # signed_app's tests/, whose shared fakes (_app_fixtures) the scrobbler's and the
+  # runner's own fixtures import through a runtime sys.path insert; a run over either
+  # tool's folder alone never type-checks that folder in its batch.
+  "$MYPY_CONFIG_FILE_DIR/signed_app/tests",
+  # The runner's private src/, which runner.py and its suites put on sys.path, and its
+  # grant probe's folder, which runner.py adds the same way so the install code can
+  # import the probe's outcome names.
+  "$MYPY_CONFIG_FILE_DIR/runner/src",
+  "$MYPY_CONFIG_FILE_DIR/runner/grant_probe",
   # launchd_agent, which installs the scrobbler's launch agent, and the libraries it
   # puts on sys.path; os_schedule_gen puts its own src/ there too.
   "$MYPY_CONFIG_FILE_DIR/launchd_agent",
@@ -146,6 +160,7 @@ mypy_path = [
   "$MYPY_CONFIG_FILE_DIR/swift_gate/src",
   "$MYPY_CONFIG_FILE_DIR/pyproject_config",
   "$MYPY_CONFIG_FILE_DIR/venv_prune",
+  "$MYPY_CONFIG_FILE_DIR/nested_checkout",
   # The subdirectory conventions os_schedule_gen's and pyproject_config's suites import.
   "$MYPY_CONFIG_FILE_DIR/tool_subdirs",
 ]
@@ -156,16 +171,23 @@ mypy_path = [
 module = ["jsonschema", "jsonschema.*"]
 ignore_missing_imports = true
 
-# The scrobbler's Swift package is gated by swift_gate, which ships here: run
-# python swift_gate/swift_gate.py --path scrobbler/app on macOS. It reads this table from
-# the nearest pyproject.toml.
+# The scrobbler's and the runner's Swift packages are gated by swift_gate, which ships
+# here: run python swift_gate/swift_gate.py --path scrobbler/app, or --path runner/app,
+# on macOS. It reads this table from the nearest pyproject.toml.
 [tool.swift_gate]
 # The one macOS deployment floor the package declares, exactly.
 macos_floor = "14"
 # The real-host seams: the live Music.app layer and the executable. They are kept free of
 # logic a test could reach, and proven by the operator's live smoke test instead, so they
 # stay out of the region-coverage bar. Relative to this file's directory.
-exclude = ["scrobbler/app/Sources/ScrobblerLive", "scrobbler/app/Sources/scrobbler"]
+exclude = [
+  "scrobbler/app/Sources/ScrobblerLive",
+  "scrobbler/app/Sources/scrobbler",
+  # The runner's live spawner, signal forwarder and self-check, and its executable: the
+  # same two seams, proven by its RUNNER_LIVE suite and the installed app instead.
+  "runner/app/Sources/RunnerLive",
+  "runner/app/Sources/runner",
+]
 
 # --- Tables the shipped tests read. ---
 
@@ -212,7 +234,9 @@ exclude = ["NOTICE"]
 # It is read by the Swift package under scrobbler/app/, which the test scans as well.
 # SCROBBLER_REGOLD=1 makes the scrobbler's Swift golden tests write their files under
 # scrobbler/contract_built/ and scrobbler/status_built/ instead of comparing against
-# them, so those tests then cannot fail. LAUNCHD_AGENT_LIVE=1 runs launchd_agent's one
+# them, so those tests then cannot fail. RUNNER_LIVE=1 enables the runner's live Swift
+# spawn tests under runner/app/, which start /usr/bin/true and /bin/sh only; unset, they
+# are disabled. LAUNCHD_AGENT_LIVE=1 runs launchd_agent's one
 # live test, which installs and removes a throwaway agent in the real launchd; unset, it
 # skips.
 [tool.gate_cache]
@@ -224,5 +248,6 @@ env = [
   "PLAY_COUNT_BASELINE_LIVE",
   "SCROBBLER_LIVE",
   "SCROBBLER_REGOLD",
+  "RUNNER_LIVE",
   "LAUNCHD_AGENT_LIVE",
 ]

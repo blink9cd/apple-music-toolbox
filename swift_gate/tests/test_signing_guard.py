@@ -220,6 +220,65 @@ class RedactEchoTests(unittest.TestCase):
                 self.assertEqual(scrubbed, "Apple Development: …: ambiguous")
 
 
+# The closed list of recognized types, restated on purpose: a widening of the constant must
+# show up as a failing pin here, never pass by being compared with itself.
+RULED_TYPES = frozenset(
+    {
+        "Apple Development",
+        "Apple Distribution",
+        "Developer ID Application",
+        "Developer ID Installer",
+        "Mac App Distribution",
+        "Mac Installer Distribution",
+        "Mac Developer",
+        "iPhone Developer",
+        "iPhone Distribution",
+        "3rd Party Mac Developer Application",
+        "3rd Party Mac Developer Installer",
+    }
+)
+
+
+class CertificateTypeTests(unittest.TestCase):
+    """Only a listed certificate type keeps its label; any other loses the whole name."""
+
+    def test_the_recognized_types_are_exactly_the_listed_ones(self) -> None:
+        self.assertEqual(frozenset(swgate_signing.CERTIFICATE_TYPES), RULED_TYPES)
+
+    def test_each_recognized_type_keeps_its_label(self) -> None:
+        for kind in swgate_signing.CERTIFICATE_TYPES:
+            text = f"{kind}: Example Person ({TEAM_ID}): ambiguous"
+            with self.subTest(kind=kind):
+                scrubbed = swgate_signing.redact(text, "-")
+                self.assertEqual(scrubbed, f"{kind}: …: ambiguous")
+
+    def test_a_diagnostic_prefix_keeps_the_real_type(self) -> None:
+        text = f"codesign: Apple Development: Example Person ({TEAM_ID})"
+        scrubbed = swgate_signing.redact(text, "-")
+        self.assertEqual(scrubbed, "codesign: Apple Development: …")
+
+    def test_each_recognized_type_survives_a_prefix(self) -> None:
+        for kind in swgate_signing.CERTIFICATE_TYPES:
+            text = f"error: {kind}: Example Person ({TEAM_ID})"
+            with self.subTest(kind=kind):
+                scrubbed = swgate_signing.redact(text, "-")
+                self.assertEqual(scrubbed, f"error: {kind}: …")
+
+    def test_an_unlisted_type_is_redacted_whole(self) -> None:
+        for text in (
+            f"Custom Signing: Example Person ({TEAM_ID})",
+            f"codesign: Custom Signing: Example Person ({TEAM_ID})",
+        ):
+            with self.subTest(text=text):
+                scrubbed = swgate_signing.redact(text, "-")
+                self.assertEqual(scrubbed, "…: …")
+
+    def test_a_type_inside_a_longer_word_is_not_recognized(self) -> None:
+        # "XMac Developer" is not "Mac Developer": the label is not kept, the name goes.
+        scrubbed = swgate_signing.redact(f"XMac Developer: Example ({TEAM_ID})", "-")
+        self.assertEqual(scrubbed, "…: …")
+
+
 class SingleWordIdentityTests(unittest.TestCase):
     """A one-word identity (a SHA-1, a bare team ID) is never printed: a placeholder is."""
 
@@ -237,9 +296,10 @@ class SingleWordIdentityTests(unittest.TestCase):
         self.assertIn("<identity>…", scrubbed)
 
     def test_redact_scrubs_a_bare_team_id_identity(self) -> None:
-        # Ten characters: no longer than the placeholder, so only the team-ID rule hides it.
+        # Ten characters, no longer than the placeholder: masked where codesign echoes it
+        # all the same, so it shows as the placeholder there.
         scrubbed = swgate_signing.redact(f"error: {TEAM_ID}: not found", TEAM_ID)
-        self.assertEqual(scrubbed, "error: …: not found")
+        self.assertEqual(scrubbed, "error: <identity>…: not found")
 
 
 class SingleWordStageTests(test_signing._SignCase):

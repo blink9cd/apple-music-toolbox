@@ -55,10 +55,6 @@ import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
 import report_file  # noqa: E402 - import follows the sys.path bootstrap above
 import stdio_utf8  # noqa: E402 - import follows the sys.path bootstrap above
 
-# music_calls is at the 500-line file cap, so its trailing-number match is imported
-# under a public name, as baseline_calls imports its call primitive.
-from music_calls import _error_number as error_number  # noqa: E402 - bootstrap above
-
 #: The version every baseline names as its ``submission_client_version``.
 VERSION = "0.1.0"
 #: The one platform Music.app and ``osascript`` exist on.
@@ -113,8 +109,8 @@ Exit codes:
   2    could not start or write: not macOS, --output exists, has no folder, or lies
        inside a git working tree, the contract extra is missing, Music.app is not
        running, a Music.app call failed or timed out, or the file could not be written
-  130  interrupted (Ctrl-C): before the file is written, nothing is; during its
-       read-back, --output was written but not confirmed"""
+  130  interrupted (Ctrl-C): before the file is written, nothing is; once it is,
+       --output was written but not confirmed"""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -165,12 +161,17 @@ def _notice(stream: TextIO, text: str) -> None:
     stdio_utf8.print_escaped(stdio_utf8.spell_unsafe(text), stream)
 
 
+def _exists_already(output: Path) -> _CannotStart:
+    """The refusal of a target that exists: a snapshot is never replaced."""
+    return _CannotStart(
+        f"--output {output} exists already; a snapshot is never replaced"
+    )
+
+
 def _check_output(output: Path) -> None:
     """Refuse a target that exists (a dangling link too), or that `report_file` refuses."""
     if os.path.lexists(output):
-        raise _CannotStart(
-            f"--output {output} exists already; a snapshot is never replaced"
-        )
+        raise _exists_already(output)
     reason = report_file.refusal(output)
     if reason is not None:
         raise _CannotStart(f"--output: {reason}")
@@ -184,7 +185,7 @@ def _failed_call(stage: str, error: music_calls.MusicCallError) -> _CannotStart:
     what was being asked, whether it timed out, and the trailing number are kept.
     """
     kind = "timed out" if isinstance(error, music_calls.CallTimedOut) else "failed"
-    number = error_number(error.reason)
+    number = music_calls.error_number(error.reason)
     told = "no error number" if number is None else f"error {number}"
     return _CannotStart(f"Music.app {kind} at {stage} ({told})")
 
@@ -283,20 +284,33 @@ def _reads_back_valid(output: Path) -> bool:
         return False
 
 
-def _write_and_confirm(output: Path, document: dict[str, object]) -> None:
-    """Write *document* atomically, then read it back and check it again.
+def _write_and_confirm(
+    output: Path, document: dict[str, object], stream: TextIO, prog: str
+) -> None:
+    """Write *document* atomically as a new file, then read it back and check it again.
 
     The target is checked again first: a file made while Music was read is not
-    replaced, and a folder that became part of a repository is not written into.
+    replaced, and a folder that became part of a repository is not written into. A
+    file made after that check is refused by `report_file.write_new` itself, which
+    never replaces one. A staging file the write could not remove is named on
+    *stream*, once, as *prog*'s notice: the file is written, so the run goes on.
     """
     _check_output(output)
     text = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     try:
-        report_file.write_atomically(output, text.encode("utf-8"))
+        leftover = report_file.write_new(output, text.encode("utf-8"))
+    except report_file.InterruptedAfterPublish:
+        raise _InterruptedUnconfirmed from None
+    except FileExistsError:
+        raise _exists_already(output) from None
     except OSError as error:
         raise _CannotStart(
             f"cannot write --output {output}: {error.strerror or error}"
         ) from None
+    if leftover is not None:
+        _notice(
+            stream, f"{prog}: --output was written; remove its staging file {leftover}"
+        )
     try:
         confirmed = _reads_back_valid(output)
     except KeyboardInterrupt:
@@ -317,15 +331,18 @@ def _report(stream: TextIO, summary: baseline_map.Summary) -> None:
         _notice(stream, f"missing {key}: {count}")
 
 
-def _run(output: Path, wiring: Wiring) -> baseline_map.Summary:
-    """Validate, read, build, write, and confirm; return what was written."""
+def _run(output: Path, wiring: Wiring, prog: str) -> baseline_map.Summary:
+    """Validate, read, build, write, and confirm; return what was written.
+
+    *prog* names the tool in a notice the write prints while the run goes on.
+    """
     _check_output(output)
     baseline_schema.require_contract()
     _require_music(wiring.run)
     captured_at = int(wiring.now())
     rows = _read_library(wiring)
     document, summary = _build_and_check(rows, captured_at)
-    _write_and_confirm(output, document)
+    _write_and_confirm(output, document, wiring.stderr, prog)
     return summary
 
 
@@ -347,7 +364,7 @@ def main(argv: Sequence[str] | None = None, *, wiring: Wiring | None = None) -> 
         )
         return EXIT_CANNOT
     try:
-        summary = _run(Path(os.path.abspath(args.output)), wiring)
+        summary = _run(Path(os.path.abspath(args.output)), wiring, prog)
     except (_CannotStart, baseline_schema.ContractMissing) as refusal:
         _notice(stream, f"{prog}: {refusal}")
         return EXIT_CANNOT
@@ -356,9 +373,9 @@ def main(argv: Sequence[str] | None = None, *, wiring: Wiring | None = None) -> 
         for detail in refusal.details:
             _notice(stream, f"  {detail}")
         return EXIT_REFUSED
-    # The file is written atomically at the very end, so an interrupt before
-    # write_atomically returns leaves nothing, and one during it leaves no partial file.
-    # One during the read-back after it leaves a file written but never confirmed.
+    # The file is published whole at the very end by a hard link, so an interrupt
+    # before the link is made leaves nothing. One once it is made, as write_new
+    # finishes or during the read-back, leaves a file written but never confirmed.
     except KeyboardInterrupt:
         _notice(stream, f"{prog}: interrupted; nothing written")
         return EXIT_INTERRUPTED

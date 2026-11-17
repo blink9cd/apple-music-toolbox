@@ -13,7 +13,8 @@ private struct SamplePlay: Codable, Equatable {
 private let statusKeys: Set<String> = [
   "format", "version", "pid", "started_at", "heartbeat_at", "music_running", "playing",
   "queue_backlog", "oldest_queued_at", "refused_count", "last_queued_at", "last_sent_at",
-  "last_send_error", "unrecordable_count", "automation_denied", "now_playing",
+  "last_send_error", "unrecordable_count", "automation_denied", "automation_asked_at",
+  "now_playing",
 ]
 
 @Test func theStateFilesSitWhereThePathsSay() {
@@ -35,7 +36,8 @@ private let statusKeys: Set<String> = [
   #expect(object["pid"] as? Int == 4242)
   #expect(object["heartbeat_at"] as? Double == 1_793_000_030)
   for key in [
-    "oldest_queued_at", "last_queued_at", "last_sent_at", "last_send_error", "now_playing",
+    "oldest_queued_at", "last_queued_at", "last_sent_at", "last_send_error",
+    "automation_asked_at", "now_playing",
   ] {
     #expect(object[key] is NSNull, "\(key) should be null")
   }
@@ -56,6 +58,7 @@ private let statusKeys: Set<String> = [
   status.lastSendError = "store unreachable"
   status.unrecordableCount = 2
   status.automationDenied = true
+  status.automationAskedAt = 1_795_000_120.25
   status.nowPlaying = try RecordCoding.decode(
     NowPlayingRecord.self, from: sampleData("valid", "playing-now-local-file.json"))
   try state.writeStatus(status)

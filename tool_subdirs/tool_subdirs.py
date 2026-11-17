@@ -31,14 +31,10 @@ and a stray rule while ``tests`` has its own.
 
 Why one module and not three
 -----------------------------
-All three are the same shape: a directory pruned from a gate's walk, whose
-contents are reachable only through an explicit link from the parent. Pruning is
-the easy half; saying what the pruning cost is the half that keeps a gate honest,
-and every consumer needs the same two answers -- *what is this directory called*
-and *what did skipping it hide*. Splitting that across three modules would write
-the shape three times and force a reader to know all three exist. One module
-owning "directories a tool folder may contain" is the single source of truth the
-consumers ask, so none of them can drift onto a colliding name.
+All three are the same shape: a directory pruned from a gate's walk, reachable only
+through an explicit link from the parent, and every consumer asks the same two
+questions of it -- *what is it called* and *what did skipping it hide* -- so one
+module answers them and no consumer can drift onto a colliding name.
 
 Why the names are these names -- collision counts, not preferences
 -------------------------------------------------------------------
@@ -74,15 +70,12 @@ entire purpose; ``gate_tree`` knows that name and prunes it deliberately.
 
 The reachability limit the listing reports share
 -------------------------------------------------
-The ``*_orphan_reason`` functions answer a **name** question: that a plausible
-linking parent exists, not that it contains the ``import`` or ``source`` line. For
-``tests/`` the gap is closed by :func:`suite_reach_reason`, which reads the
-aggregator's SOURCE -- handed in by the caller, so this module stays pure -- because
-a suite is test code, which no coverage run measures. That read is static, so it
-does not prove a ``discover`` call targets ``tests/``, nor that a counted import
-runs: one under ``if False:`` or in a never-called function counts all the same.
-``lib/`` and ``src/`` keep the name-only answer, their gap covered from the other
-side: unreached code adds uncovered lines to a coverage run that gates at 100%.
+The ``*_orphan_reason`` functions answer a **name** question: that a linking parent
+exists, not that it holds the ``import`` or ``source`` line. For ``tests/``,
+:func:`suite_reach_reason` reads the aggregator's SOURCE (handed in by the caller, so
+this module stays pure), since no coverage run measures test code; that read is
+static, and its limits are in ``tool_subdirs.md``. ``lib/`` and ``src/`` keep the
+name-only answer: unreached code there is uncovered lines.
 
 Entry point assumptions
 -----------------------
@@ -118,6 +111,9 @@ _TEST_PREFIX = "test_"
 _COVERAGE_SCRIPT = "coverage.sh"
 # The unittest.TestLoader method an aggregator calls to load every suite in a dir.
 _DISCOVER_METHOD = "discover"
+# suite_select owns this name: a split load_tests returns it, and it discovers tests/.
+_FOLD_SELECTED_FUNCTION = "fold_selected"
+_WHOLE_DIR_METHODS = (_DISCOVER_METHOD, _FOLD_SELECTED_FUNCTION)
 # unittest's load_tests protocol hook: beside it, an imported suite module can run.
 _LOAD_TESTS_HOOK = "load_tests"
 
@@ -335,16 +331,19 @@ def _imported_modules(node: ast.AST) -> list[tuple[str, bool]]:
 
 
 def _reached_stems(tree: ast.Module) -> set[str] | None:
-    """Stems of the suites *tree* runs; ``None`` (every suite) if it calls ``discover``.
+    """Stems of the suites *tree* runs; ``None`` (every suite) on a whole-dir call.
 
-    A dotted module names its first part, or its second when the first is the suite
-    dir itself (``tests.test_x``); which imports count: :func:`unreached_suites`.
+    A whole-dir call is ``discover`` or ``fold_selected``. A dotted module names its
+    first part, or its second when the first is the suite dir itself
+    (``tests.test_x``); which calls and imports count: :func:`unreached_suites`.
     """
     imported: set[str] = set()
     starred: set[str] = set()
     for node in ast.walk(tree):
         func = node.func if isinstance(node, ast.Call) else None
-        if isinstance(func, ast.Attribute) and func.attr == _DISCOVER_METHOD:
+        if isinstance(func, ast.Attribute) and func.attr in _WHOLE_DIR_METHODS:
+            return None
+        if isinstance(func, ast.Name) and func.id == _FOLD_SELECTED_FUNCTION:
             return None
         for dotted, is_star in _imported_modules(node):
             parts = dotted.split(".")
@@ -374,7 +373,8 @@ def unreached_suites(
     *suite_filenames* is the ``tests/`` dir's DIRECT listing; fixtures and helpers in
     it are not suites. Count only what runs -- a suite is reached by:
 
-    * a call to any method named ``discover`` (``TestLoader``'s), which reaches all;
+    * a call to any method named ``discover`` (``TestLoader``'s), or to
+      ``suite_select``'s ``fold_selected`` in either import spelling, which reach all;
     * a STAR import of its module (``from test_x import *``, ``from tests.test_x
       import *``), which binds its TestCases where unittest's module load finds them;
     * any import of its module, in any spelling, in an aggregator that also defines a

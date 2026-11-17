@@ -3,39 +3,58 @@
 `install` refuses an entry script in a linked git worktree: such a checkout is often
 removed once its work is done, and an agent should run from the repository's main
 checkout, which stays. It refuses an absent signing setting with how to write it. It then
-builds, signs and verifies the bundle in a staging folder inside the data folder, so a
-failed build leaves the running app untouched.
+removes the work folders an install no longer running left, and builds, signs and
+verifies the bundle in a staging folder inside the data folder, so a failed build leaves
+the running app untouched.
 
 Only then does it touch the running app. An agent launchd answers about unexpectedly is
 refused before anything is replaced. A loaded agent is stopped with its plist kept, so a
-failure from here on still reads as installed. The bundle is swapped in (the old one
-renamed aside, the new one renamed in, the old one deleted, a failure to delete it being
-its own warning since the new app is already in place), and the agent is loaded through
-`launchd_agent`, whose read-back confirms launchd loaded it. Last, it confirms the app
+failure from here on still reads as installed. The bundle is swapped in, the new one and
+the old one exchanged in one atomic step, and the staging folder, now holding the old
+one, is deleted, a failure to delete it being its own warning since the new app is
+already in place. A copy of the app left under an
+earlier folder name, found by its bundle id and told from the new one by the entry it
+names, never its spelling, is removed the same way. The agent is then
+loaded through `launchd_agent`, whose read-back confirms launchd loaded it. Last, it confirms the app
 itself started: it polls `status.json` until its `started_at` is newer than the moment
 the old agent was stopped, inside a 30 s deadline with waits escalating from 0.5 s to
 4 s, and exits 1 when it never is. Taking that moment after the stop, not before the
 build, means a start the old app reported during a long build cannot pass for the new
 one's. A file-system failure on the way is one failure, never a traceback.
 
+What it prints last depends on that same status: when the app's request for Automation
+of Music is in flight, whatever its age, it says so, since a prompt may be on the screen
+at that moment; otherwise it says when the prompt will come.
+
 `uninstall` unloads the agent and removes its plist; the app, the queue, the state and
 the config stay.
 
-Entry point assumptions: imported by the scrobbler's modules, with `src/` and the shared
-libraries on `sys.path`.
+The linked-worktree check, the swap and the private folders are signed_app's
+(`app_install`); this module holds the order of steps and the scrobbler's own messages.
+
+Entry point assumptions: imported by the scrobbler's modules, with `src/`, signed_app's
+``src/`` and the shared libraries on `sys.path`.
 """
 
 from __future__ import annotations
 
+import plistlib
 import shutil
-import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
 import launchd_agent
 import scrob_bundle
 import scrob_status
-from scrob_bundle import BuildFailed, Refused
+from app_install import (
+    make_private,
+    refuse_linked_worktree,
+    same_entry,
+    swap_in,
+    sweep_stale_work,
+)
+from scrob_bundle import BuildFailed
 from scrob_host import Host
 from scrob_layout import Layout, ScrobPaths
 
@@ -47,53 +66,15 @@ RUN_ARGUMENT: Final = "run"
 CONFIRM_DEADLINE_S: Final = 30.0
 #: The waits between reads of status.json; the last repeats until the deadline.
 CONFIRM_WAITS_S: Final = (0.5, 1.0, 2.0, 4.0)
-#: The bound on the one git call.
-GIT_TIMEOUT_S: Final = 5.0
-#: What `rev-parse` is asked, one answer line each, in this order.
-_DIR_QUESTIONS: Final = ("--git-dir", "--git-common-dir")
-#: git's own words for a folder outside every repository.
-_NOT_A_REPOSITORY: Final = (
-    "not a git repository (or any of the parent directories)",
-    "not a git repository (or any parent up to mount point",
-)
-
-
-def refuse_linked_worktree(host: Host) -> None:
-    """Refused when the entry script sits in a linked git worktree.
-
-    A linked worktree's `--git-dir` differs from its `--git-common-dir`. A folder outside
-    every repository (an exported copy), as git's own message says, may install; any
-    other git failure, an answer short of two lines, or a git that cannot answer refuses.
-    """
-    folder = host.script.parent
-    argv = ["git", "-C", str(folder), "rev-parse", *_DIR_QUESTIONS]
-    try:
-        done = host.run(argv, cwd=folder, timeout=GIT_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise Refused(
-            f"could not ask git whether {folder} is a linked worktree "
-            f"({type(error).__name__})"
-        ) from None
-    if done.returncode != 0 and any(
-        phrase in done.stderr for phrase in _NOT_A_REPOSITORY
-    ):
-        return
-    lines = done.stdout.splitlines()
-    if done.returncode != 0 or len(lines) < len(_DIR_QUESTIONS):
-        raise Refused(
-            f"git could not say whether {folder} is a linked worktree "
-            f"(exit {done.returncode})"
-        )
-    git_dir, common_dir = ((folder / line).resolve() for line in lines[:2])
-    if git_dir != common_dir:
-        raise Refused(
-            f"{folder} is in a linked git worktree, which is often removed once its "
-            "work is done; install from the repository's main checkout"
-        )
 
 
 def agent_plist(layout: Layout, paths: ScrobPaths) -> bytes:
-    """The agent's plist: the installed app's `run`, kept alive, from the data folder."""
+    """The agent's plist: the installed app's `run`, from the data folder.
+
+    launchd restarts it only after a failed exit or a crash: the app exits 0 on a refusal
+    no restart can cure (a data folder it may not use), so such a refusal ends instead of
+    restarting every throttle interval with a line in err.log each time.
+    """
     executable = scrob_bundle.bundle_executable(paths.app_bundle, layout)
     return launchd_agent.build_keepalive_plist(
         label=layout.launchd_label,
@@ -101,6 +82,7 @@ def agent_plist(layout: Layout, paths: ScrobPaths) -> bytes:
         working_directory=str(paths.data_dir),
         log_paths=(str(paths.out_log), str(paths.err_log)),
         path_value=PATH_VALUE,
+        keep_alive=launchd_agent.RESTART_AFTER_FAILURE,
     )
 
 
@@ -113,7 +95,7 @@ def stage_bundle(host: Host, layout: Layout, paths: ScrobPaths, identity: str) -
     staging = paths.data_dir / f".staging-{host.pid}"
     if staging.exists():
         shutil.rmtree(staging)
-    scrob_bundle.make_private(staging)
+    make_private(staging)
     try:
         return scrob_bundle.build_bundle(host, layout, staging, identity)
     except BaseException:
@@ -121,70 +103,134 @@ def stage_bundle(host: Host, layout: Layout, paths: ScrobPaths, identity: str) -
         raise
 
 
-def swap_in(staged: Path, final: Path, aside: Path) -> None:
-    """Rename `final` aside to `aside`, then `staged` in as `final`.
+def _swap(host: Host, paths: ScrobPaths, staged: Path) -> None:
+    """Swap the staged bundle in, in one step, then remove the staging folder.
 
-    A folder already at `aside` is one an earlier run with this process's id left, and is
-    removed first, or the rename aside would fail after the agent was already stopped.
-    When the new bundle cannot be renamed in, the old one is put back before the error
-    propagates, so a failed swap never leaves no app at all.
+    After an upgrade the staging folder holds the old bundle, so removing it removes
+    that too; a failure to remove it is a warning, since the new app is in place.
     """
-    if aside.exists():
-        shutil.rmtree(aside)
-    if final.exists():
-        final.rename(aside)
     try:
-        staged.rename(final)
-    except OSError:
-        if aside.exists():
-            aside.rename(final)
-        raise
-
-
-def _swap(host: Host, layout: Layout, paths: ScrobPaths, staged: Path) -> None:
-    """Swap the staged bundle in, then remove the old bundle and the emptied staging folder."""
-    aside = paths.data_dir / f".old-{host.pid}-{layout.app_name}"
-    try:
-        swap_in(staged, paths.app_bundle, aside)
-        staged.parent.rmdir()
+        swap_in(staged, paths.app_bundle)
     except OSError as error:
         raise BuildFailed(
             f"could not swap the new app into {paths.app_bundle} "
             f"({type(error).__name__})"
         ) from None
     try:
-        if aside.exists():
-            shutil.rmtree(aside)
+        shutil.rmtree(staged.parent)
     except OSError as error:
         # The new app is in place; only the old copy is left behind.
         print(
-            f"WARNING: the new app is in place, but could not remove the old app at "
-            f"{aside} ({type(error).__name__}); remove it by hand",
+            f"WARNING: the new app is in place, but could not remove the old app in "
+            f"the staging folder {staged.parent} ({type(error).__name__}); remove it "
+            "by hand",
             file=host.err,
         )
 
 
-def _started_since(paths: ScrobPaths, began: float) -> bool:
-    """Whether status.json reports a start newer than `began`."""
+def _is_earlier_copy(
+    layout: Layout,
+    paths: ScrobPaths,
+    candidate: Path,
+    same: Callable[[Path, Path], bool],
+) -> bool:
+    """Whether `candidate` is this app under another folder name: same bundle id, not a link.
+
+    The installed bundle is told apart by `same`, the entry each path names, never by
+    spelling: on a volume that ignores case, a folder spelled otherwise can BE the bundle
+    just installed. A link is never followed, and a folder whose Info.plist is absent or
+    unreadable is not ours to judge, so both are kept.
+    """
+    if (
+        same(candidate, paths.app_bundle)
+        or candidate.is_symlink()
+        or not candidate.is_dir()
+    ):
+        return False
+    try:
+        with (candidate / "Contents" / "Info.plist").open("rb") as handle:
+            info = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return False
+    return isinstance(info, dict) and info.get("CFBundleIdentifier") == layout.bundle_id
+
+
+def remove_earlier_copies(
+    host: Host,
+    layout: Layout,
+    paths: ScrobPaths,
+    *,
+    same_entry: Callable[[Path, Path], bool] = same_entry,
+) -> None:
+    """Remove this app left in the data folder under an earlier name, once the new one is in.
+
+    Renaming the app (its `app_name`) changes its folder, and the swap replaces only the
+    folder of the current name, so the earlier one would sit there for good. It is found by
+    its bundle id, never by a remembered name, so the next rename is covered too. A copy
+    that cannot be removed is a warning: the new app is already in place. `same_entry`
+    is the identity seam a test replaces.
+    """
+    for candidate in sorted(paths.data_dir.glob("*.app")):
+        if not _is_earlier_copy(layout, paths, candidate, same_entry):
+            continue
+        try:
+            shutil.rmtree(candidate)
+        except OSError as error:
+            print(
+                f"WARNING: the new app is in place, but could not remove an earlier copy "
+                f"at {candidate} ({type(error).__name__}); remove it by hand",
+                file=host.err,
+            )
+
+
+def _started_since(paths: ScrobPaths, began: float) -> scrob_status.AppStatus | None:
+    """The status reporting a start newer than `began`; None while status.json has none."""
     try:
         status = scrob_status.read_app_status(paths.status_file)
     except scrob_status.StatusFileError:
-        return False
-    return status.started_at is not None and status.started_at > began
+        return None
+    started = status.started_at is not None and status.started_at > began
+    return status if started else None
 
 
-def confirm_started(host: Host, paths: ScrobPaths, began: float) -> bool:
-    """Poll status.json until the app reports a start after `began`, or the deadline."""
+def confirm_started(
+    host: Host, paths: ScrobPaths, began: float
+) -> scrob_status.AppStatus | None:
+    """Poll status.json until the app reports a start after `began`, or the deadline.
+
+    Returns the status that reported the start, or None when the deadline passed first.
+    """
     deadline = host.clock() + CONFIRM_DEADLINE_S
     attempt = 0
-    while not _started_since(paths, began):
+    while (status := _started_since(paths, began)) is None:
         remaining = deadline - host.clock()
         if remaining <= 0:
-            return False
+            return None
         wait = CONFIRM_WAITS_S[min(attempt, len(CONFIRM_WAITS_S) - 1)]
         host.sleep(min(wait, remaining))
         attempt += 1
-    return True
+    return status
+
+
+def prompt_advice(status: scrob_status.AppStatus) -> str:
+    """What a finished install says about the Automation prompt, from the app's `status`.
+
+    A request in flight is named at any age: the install reads the status moments after
+    the app starts, long before `status` would call the wait too long, and a prompt on
+    the screen then is exactly what the reader must act on. A request already decided
+    answers within milliseconds, so the wording allows that no prompt is showing.
+    """
+    if status.automation_asked_at is not None:
+        return (
+            "The app's request for Automation of Music is in flight: if macOS is "
+            f"showing a prompt asking whether {scrob_status.STEM} may control Music, "
+            "allow it, or no play is logged."
+        )
+    return (
+        f"macOS asks whether {scrob_status.STEM} may control Music (Automation): at "
+        "once when Music.app is running as the app starts, otherwise at the first "
+        "play, pause or track change. Allow it, or no play is logged."
+    )
 
 
 def _stop_old_agent(host: Host, layout: Layout) -> None:
@@ -211,10 +257,13 @@ def _replace_agent(
     # Made first: a refused folder (a planted symlink) must stop install before the old
     # agent is stopped or its app swapped out, and neither folder needs the new bundle.
     for folder in (paths.logs_dir, paths.state_dir):
-        scrob_bundle.make_private(folder)
+        make_private(folder)
     _stop_old_agent(host, layout)
     stopped = host.now()
-    _swap(host, layout, paths, staged)
+    _swap(host, paths, staged)
+    # After the swap and with the old agent stopped, so an earlier-named copy is never
+    # the only app left, nor one still running.
+    remove_earlier_copies(host, layout, paths)
     launchd_agent.install_agent(
         host.launchctl,
         label=layout.launchd_label,
@@ -233,12 +282,14 @@ def _install_bundle(
     be written) is BuildFailed, one line naming its type, never a traceback.
     """
     try:
-        scrob_bundle.make_private(paths.data_dir)
+        make_private(paths.data_dir)
+        sweep_stale_work(paths.data_dir, host.pid, host.err)
         staged = stage_bundle(host, layout, paths, identity)
         try:
             return _replace_agent(host, layout, paths, staged)
         finally:
-            # Gone already once the swap succeeds; left only when launchd failed first.
+            # Gone already once the swap succeeds; left when a step before it failed
+            # (launchd, the swap itself) or its removal after the swap did.
             shutil.rmtree(staged.parent, ignore_errors=True)
     except OSError as error:
         raise BuildFailed(f"install failed: {type(error).__name__}: {error}") from None
@@ -250,7 +301,8 @@ def install(host: Host, layout: Layout) -> int:
     identity = scrob_bundle.read_identity(host, layout)
     paths = layout.paths(host.home)
     stopped = _install_bundle(host, layout, paths, identity)
-    if not confirm_started(host, paths, stopped):
+    started = confirm_started(host, paths, stopped)
+    if started is None:
         print(
             f"ERROR: the agent is loaded, but the app did not report a start within "
             f"{CONFIRM_DEADLINE_S:g} s; read {paths.err_log}",
@@ -258,9 +310,8 @@ def install(host: Host, layout: Layout) -> int:
         )
         return 1
     print(
-        f"installed {paths.app_bundle} and started it under launchd. At the first play, "
-        "macOS asks whether listensmith scrobbler may control Music (Automation): "
-        "allow it, or no play is logged.",
+        f"installed {paths.app_bundle} and started it under launchd. "
+        f"{prompt_advice(started)}",
         file=host.out,
     )
     return 0

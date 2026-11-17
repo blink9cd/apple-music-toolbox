@@ -1,0 +1,16 @@
+usage: scrobbler build [-h] --out DIR [--sign]
+
+build the app bundle, and with --sign sign it
+
+options:
+  -h, --help  show this help message and exit
+  --out DIR   folder to assemble the bundle in; it must not already hold one
+  --sign      sign the bundle with the configured identity, then verify it
+              (default: False)
+
+Prerequisites: the Python release requires-python names in the project's
+pyproject.toml, and macOS 14 or later. build and install need the Swift
+toolchain and codesign; build --sign and install need a signing identity in
+the signing setting file layout.json names, outside every checkout. Run
+install from the repository's main checkout, never a linked worktree; see
+scrobbler.md.

@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
+import script_text  # noqa: E402 - import follows the sys.path bootstrap above
 
 # The scripts that address Music.app, each of which must hold the in-script bound.
 _MUSIC_SCRIPTS = (
@@ -107,7 +108,9 @@ class ScriptTextTest(unittest.TestCase):
             music_calls.REFRESH_IDS_SCRIPT,
         ):
             with self.subTest(script=script.splitlines()[0]):
-                self.assertTrue(script.startswith("on run argv\n"))
+                # After the shared escape's handlers, where a script carries them.
+                body = script.removeprefix(script_text.ESCAPE_HANDLER + "\n")
+                self.assertTrue(body.startswith("on run argv\n"))
                 self.assertTrue(script.endswith("end run"))
 
     def test_the_refresh_by_id_re_raises_all_but_a_missing_track(self) -> None:
@@ -256,6 +259,39 @@ class CountTracksTest(unittest.TestCase):
     def test_a_client_kill_is_a_timeout(self) -> None:
         with self.assertRaises(music_calls.CallTimedOut):
             music_calls.count_file_tracks(run=FakeRunner(killed()))
+
+
+class ErrorNumberTest(unittest.TestCase):
+    """The published trailing-number match, which play_count_baseline imports."""
+
+    def test_the_number_ending_a_reason_is_read(self) -> None:
+        for reason, number in (
+            ("Music got an error: AppleEvent timed out. (-1712)", -1712),
+            ("not allowed (-1743)  ", -1743),
+            ("an invented positive one (42)", 42),
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(music_calls.error_number(reason), number)
+
+    def test_a_number_not_at_the_end_is_none(self) -> None:
+        for reason in ('Can\'t get album "(-1712)".', "osascript exited 1", ""):
+            with self.subTest(reason=reason):
+                self.assertIsNone(music_calls.error_number(reason))
+
+
+class CallTest(unittest.TestCase):
+    """The published call primitive, which play_count_baseline imports."""
+
+    def test_the_script_and_its_arguments_travel_after_a_double_dash(self) -> None:
+        fake = FakeRunner(completed("invented reply\n"))
+        reply = music_calls.call("return 1", ("-a", "b"), fake)
+        self.assertEqual(reply, "invented reply\n")
+        self.assertEqual(
+            fake.calls[0][0], ["osascript", "-e", "return 1", "--", "-a", "b"]
+        )
+
+    def test_no_private_call_primitive_is_left_to_import(self) -> None:
+        self.assertFalse(hasattr(music_calls, "_call"))
 
 
 class RefreshRangeTest(unittest.TestCase):

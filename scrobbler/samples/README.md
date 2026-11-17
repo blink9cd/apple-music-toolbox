@@ -8,7 +8,9 @@ the queue files the replay command writes for it, one listen per file.
 
 One event per line, each with its time in Unix seconds as `at` and exactly one of
 `notice` (a playerInfo notice's fields), `position` or `snapshot` (the text that script
-returned, its fields joined by the unit separator, written `\u001f`), or `quit`.
+returned, its fields joined by the unit separator, written `\u001f`, with a percent sign,
+the separator, a tab or a line break inside a snapshot's text field percent-escaped, as
+`%25`, `%1F`, `%09`, `%0A` or `%0D`), or `quit`.
 
 | Track | What happens | Queued |
 | --- | --- | --- |

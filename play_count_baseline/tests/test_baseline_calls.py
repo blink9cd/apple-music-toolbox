@@ -17,6 +17,7 @@ import baseline_calls  # noqa: E402 - import follows the sys.path bootstrap abov
 import baseline_fixtures as fx  # noqa: E402 - import follows the sys.path bootstrap above
 import baseline_rows  # noqa: E402 - import follows the sys.path bootstrap above
 import music_calls  # noqa: E402 - baseline_calls put tag_refresh's src/ on sys.path
+import script_text  # noqa: E402 - baseline_calls put tag_refresh's src/ on sys.path
 
 #: The script's per-track properties, each read once for the whole range.
 _RANGE_PROPERTIES = (
@@ -51,8 +52,7 @@ _ROW_ORDER = [
     "trackPath",
 ]
 #: One field the row line reads: a list's ``item i``, or the path local.
-_ROW_FIELD = re.compile(r"item i of (\w+)|\b(trackPath)$")
-
+_ROW_FIELD = re.compile(r"item i of (\w+)|\((trackPath)\)")
 #: The script's one block that talks to Music.app.
 _TELL_BLOCK = re.compile(r'tell application "Music"(.*?)end tell', re.DOTALL)
 #: A ``set`` that assigns a script local: ``set <identifier> to``.
@@ -200,7 +200,8 @@ class PlayCountsScriptTest(unittest.TestCase):
                 name,
             )
 
-    def test_every_text_field_is_flattened(self) -> None:
+    def test_every_text_field_and_the_path_are_escaped(self) -> None:
+        script = baseline_calls.PLAY_COUNTS_SCRIPT
         for name in (
             "trackNames",
             "trackArtists",
@@ -208,9 +209,18 @@ class PlayCountsScriptTest(unittest.TestCase):
             "albumArtists",
             "trackGenres",
         ):
-            self.assertIn(
-                f"my flatText(item i of {name})", baseline_calls.PLAY_COUNTS_SCRIPT
-            )
+            self.assertIn(f"my escapedText(item i of {name})", script)
+        self.assertIn("& tab & (my escapedText(trackPath))", script)
+
+    def test_no_text_is_flattened_any_more(self) -> None:
+        # Flattening turned a tab or line break into a space, which no parser can undo.
+        self.assertNotIn("flatText", baseline_calls.PLAY_COUNTS_SCRIPT)
+
+    def test_the_script_holds_the_shared_escape_handler_verbatim(self) -> None:
+        # The one copy tag_refresh's script_text holds, which its osascript suite runs.
+        self.assertTrue(
+            baseline_calls.PLAY_COUNTS_SCRIPT.startswith(script_text.ESCAPE_HANDLER)
+        )
 
     def test_date_and_duration_use_the_scrobbler_s_handlers(self) -> None:
         script = baseline_calls.PLAY_COUNTS_SCRIPT

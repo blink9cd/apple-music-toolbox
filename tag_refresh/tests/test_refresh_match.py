@@ -23,16 +23,23 @@ import refresh_fixtures as rf  # noqa: E402 - import follows the sys.path bootst
 import refresh_match as rm  # noqa: E402 - import follows the sys.path bootstrap above
 
 settings.register_profile(
-    "fuzz_gate_deterministic",
+    "deterministic",
     derandomize=True,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
-settings.load_profile("fuzz_gate_deterministic")
+settings.load_profile("deterministic")
 
+#: What the lookup script writes for each character it escapes in a path.
+_ESCAPED = {char: f"%{ord(char):02X}" for char in "%\x1f\t\n\r"}
 #: Invented persistent IDs, in the shape Music emits.
 _PID_A = "0123456789ABCDEF"
 _PID_B = "FEDCBA9876543210"
+
+
+def _escaped(text: str) -> str:
+    """*text* with each character the lookup script escapes replaced by its escape."""
+    return "".join(_ESCAPED.get(char, char) for char in text)
 
 
 def _mp3(path: str, device: int, inode: int) -> rc.Mp3:
@@ -96,6 +103,23 @@ class ParseRowsTest(unittest.TestCase):
     def test_empty_text_holds_nothing(self) -> None:
         self.assertEqual(rm.parse_rows(""), rm.ParsedRows((), 0))
 
+    def test_an_escaped_path_reads_back_exactly(self) -> None:
+        # The script writes each percent sign, tab, line break and U+001F of a path as
+        # a percent sign and two hex digits; the parser undoes it after the shape check.
+        text = f"12\t{_PID_A}\t/L/a%0Ab%09c%0Dd%25e%1F.mp3\n"
+        self.assertEqual(
+            rm.parse_rows(text),
+            rm.ParsedRows((rm.Row(12, _PID_A, "/L/a\nb\tc\rd%e\x1f.mp3"),), 0),
+        )
+
+    def test_a_path_holding_a_row_forges_none(self) -> None:
+        # Escaped, the linefeed and the whole row after it stay inside the one path.
+        path = f"/L/evil\n99\t{_PID_B}\t/L/A/01.mp3"
+        text = f"12\t{_PID_A}\t{_escaped(path)}\n"
+        self.assertEqual(
+            rm.parse_rows(text), rm.ParsedRows((rm.Row(12, _PID_A, path),), 0)
+        )
+
     @given(st.text())
     def test_fuzz_parse_rows(self, text: str) -> None:
         parsed = rm.parse_rows(text)
@@ -109,10 +133,8 @@ class ParseRowsTest(unittest.TestCase):
                 st.integers(min_value=1, max_value=10**12),
                 st.text(alphabet="0123456789ABCDEFabcdef", min_size=16, max_size=16),
                 st.text(
-                    alphabet=st.characters(
-                        codec="utf-8",
-                        blacklist_characters="\t\n\r\x00",
-                    )
+                    alphabet=st.sampled_from("%\t\n\r0129ADF/\u0301")
+                    | st.characters(codec="utf-8", blacklist_characters="\x00")
                 ),
             )
         )
@@ -120,7 +142,8 @@ class ParseRowsTest(unittest.TestCase):
     def test_any_well_formed_rows_round_trip(
         self, rows: list[tuple[int, str, str]]
     ) -> None:
-        text = "".join(f"{tid}\t{pid}\t/{tail}\n" for tid, pid, tail in rows)
+        # The script escapes the path, so any path but one holding a NUL reads back.
+        text = "".join(f"{tid}\t{pid}\t/{_escaped(tail)}\n" for tid, pid, tail in rows)
         expected = tuple(rm.Row(tid, pid, f"/{tail}") for tid, pid, tail in rows)
         self.assertEqual(rm.parse_rows(text), rm.ParsedRows(expected, 0))
 
@@ -137,7 +160,7 @@ class IsRowTest(unittest.TestCase):
             rm.Row(0, _PID_A, "/L/a.mp3"),
             rm.Row(1, "0123456789ABCDEG", "/L/a.mp3"),
             rm.Row(1, _PID_A, "L/a.mp3"),
-            rm.Row(1, _PID_A, "/L/a\n.mp3"),
+            rm.Row(1, _PID_A, "/L/a\x00.mp3"),
         ]:
             with self.subTest(row=row):
                 self.assertFalse(rm.is_row(row))
@@ -198,10 +221,10 @@ class MatchTracksTest(unittest.TestCase):
         self.assertEqual(matches.not_in_music, (other,))
 
     def test_a_forged_row_matches_only_what_its_own_path_stats_to(self) -> None:
-        # A track whose path holds a linefeed and a whole row after it: the script
-        # emits the path unescaped, so the split yields two well-formed rows. The forged
-        # one names a named MP3's path STRING, but matching asks the file system, and
-        # here that string reaches another file; a tab instead makes no row at all.
+        # Text holding a raw linefeed and a whole row after it, which the script no
+        # longer emits (it escapes the path), still splits into two well-formed rows.
+        # The forged one names a named MP3's path STRING, but matching asks the file
+        # system, and here that string reaches another file; a tab makes no row at all.
         named = _mp3("/L/A/01.mp3", 7, 70)
         forged_path = f"/L/evil\n99\t{_PID_B}\t/L/A/01.mp3"
         text = f"12\t{_PID_A}\t{forged_path}\n13\t{_PID_A}\t/L/x\t/L/A/01.mp3\n"
@@ -217,9 +240,9 @@ class MatchTracksTest(unittest.TestCase):
         self.assertEqual(matches.not_in_music, (named,))
 
     def test_a_forged_row_naming_the_real_path_attaches_its_pair(self) -> None:
-        # The realistic forgery: the forged path is the named file's own path, so it
-        # stats to the named key and its (id, persistent ID) pair is attached to that
-        # MP3. Refreshing that pair rereads another track's tags, and nothing worse.
+        # A row from any source naming the named file's own path stats to the named
+        # key, and its (id, persistent ID) pair is attached to that MP3. Refreshing
+        # that pair rereads another track's tags, and nothing worse.
         named = _mp3("/L/A/01.mp3", 7, 70)
         text = f"12\t{_PID_A}\t/L/evil\n99\t{_PID_B}\t/L/A/01.mp3\n"
         stat = rf.fake_stat({"/L/A/01.mp3": (7, 70)})

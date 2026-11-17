@@ -18,12 +18,72 @@ import Testing
   let reads = MusicScripts.snapshotSource().split(separator: "\n")
     .filter { $0.contains("set end of out to") }
     .map { String($0) }
-  let expected = SnapshotField.allCases.map {
-    "      set end of out to (\($0.expression)) as text"
-  }
+  let expected = SnapshotField.allCases.map { "      set end of out to \(read(of: $0))" }
   #expect(reads == expected)
   #expect(reads.count == 36)
 }
+
+/// One field's read as the snapshot script spells it: a text field escaped, the rest not.
+private func read(of field: SnapshotField) -> String {
+  let read = "(\(field.expression)) as text"
+  return field.kind == .text ? "my escapedText(\(read))" : read
+}
+
+/// The escape handler, verbatim: only the snapshot script, which reads text, carries it.
+/// tag_refresh's `test_script_text.py` holds this text equal to the Python scripts' copy.
+private let expectedEscapeHandler = """
+  on escapedText(theText)
+    if theText is missing value then return ""
+    set savedDelimiters to AppleScript's text item delimiters
+    set escapePairs to {{"%", "%25"}, {return & linefeed, "%0D%0A"}}
+    set escapePairs to escapePairs & {{return, "%0D"}, {linefeed, "%0A"}}
+    set escapePairs to escapePairs & {{tab, "%09"}, {character id 31, "%1F"}}
+    repeat with escapePair in escapePairs
+      set AppleScript's text item delimiters to item 1 of escapePair
+      set theParts to text items of theText
+      set AppleScript's text item delimiters to item 2 of escapePair
+      set theText to theParts as text
+    end repeat
+    set AppleScript's text item delimiters to savedDelimiters
+    set codePoints to id of theText
+    if class of codePoints is not list then set codePoints to {codePoints}
+    if codePoints contains 9 or codePoints contains 10 then return my escapedPoints(codePoints)
+    if codePoints contains 13 or codePoints contains 31 then return my escapedPoints(codePoints)
+    return theText
+  end escapedText
+
+  on escapedPoints(codePoints)
+    if codePoints is {} then return ""
+    script pointStore
+      property pts : codePoints
+      property outs : {}
+    end script
+    repeat with i from 1 to count of pointStore's pts
+      set pointValue to item i of pointStore's pts
+      if pointValue is 9 then
+        set end of pointStore's outs to 37
+        set end of pointStore's outs to 48
+        set end of pointStore's outs to 57
+      else if pointValue is 10 then
+        set end of pointStore's outs to 37
+        set end of pointStore's outs to 48
+        set end of pointStore's outs to 65
+      else if pointValue is 13 then
+        set end of pointStore's outs to 37
+        set end of pointStore's outs to 48
+        set end of pointStore's outs to 68
+      else if pointValue is 31 then
+        set end of pointStore's outs to 37
+        set end of pointStore's outs to 49
+        set end of pointStore's outs to 70
+      else
+        set end of pointStore's outs to pointValue
+      end if
+    end repeat
+    return string id (pointStore's outs)
+  end escapedPoints
+
+  """
 
 /// The three handlers, verbatim, as both scripts' agreed text opens with them.
 private let expectedHandlers = """
@@ -51,11 +111,9 @@ private let expectedHandlers = """
   """
 
 @Test func snapshotScriptMatchesTheAgreedText() {
-  let reads = SnapshotField.allCases.map {
-    "      set end of out to (\($0.expression)) as text\n"
-  }
+  let reads = SnapshotField.allCases.map { "      set end of out to \(read(of: $0))\n" }
   let expected =
-    expectedHandlers + """
+    expectedHandlers + expectedEscapeHandler + """
       if application "Music" is running then
         with timeout of 5 seconds
           tell application "Music"
@@ -67,7 +125,7 @@ private let expectedHandlers = """
             set AppleScript's text item delimiters to (character id 31)
             return out as text
           end tell
-        end with timeout
+        end timeout
       end if
       return ""
 
@@ -90,7 +148,7 @@ private let expectedHandlers = """
             set AppleScript's text item delimiters to (character id 31)
             return out as text
           end tell
-        end with timeout
+        end timeout
       end if
       return ""
 
@@ -148,4 +206,25 @@ private let expectedHandlers = """
 
 @Test func separatorIsTheAsciiUnitSeparator() {
   #expect(MusicScripts.separator.asciiValue == 31)
+}
+
+@Test func positionScriptEscapesNothingSinceItReadsNoText() {
+  #expect(!MusicScripts.positionSource.contains("escapedText"))
+}
+
+@Test func everyTextFieldAndNoOtherIsEscaped() {
+  let source = MusicScripts.snapshotSource()
+  for field in SnapshotField.allCases {
+    let escaped = source.contains("my escapedText((\(field.expression)) as text)")
+    #expect(escaped == (field.kind == .text), "\(field)")
+  }
+}
+
+@Test func theParserUndoesEveryEscapeTheScriptWrites() {
+  for (code, character) in [
+    ("%25", "%"), ("%1F", "\u{1F}"), ("%09", "\t"), ("%0A", "\n"), ("%0D", "\r"),
+  ] {
+    #expect(MusicScripts.snapshotSource().contains("\"\(code)"), "\(code)")
+    #expect(FieldText.unescaped(Substring(code)) == character, "\(code)")
+  }
 }

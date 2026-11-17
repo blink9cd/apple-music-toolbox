@@ -7,8 +7,8 @@ is exit 2 rather than a silent pass over code nobody built.
 
 Entry point assumptions
 -----------------------
-Reads the filesystem (one tree walk) and nothing else. Needs the ``venv_prune`` sibling
-library, resolved from this file's own location.
+Reads the filesystem (one tree walk) and nothing else. Needs the ``venv_prune`` and
+``nested_checkout`` sibling libraries, resolved from this file's own location.
 """
 
 from __future__ import annotations
@@ -18,8 +18,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "venv_prune"))
+# nested_checkout tells another checkout's top by its .git entry, so a walk rooted at the
+# primary checkout never gates a session worktree's packages as this tree's own.
+for _lib in ("venv_prune", "nested_checkout"):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / _lib))
 
+import nested_checkout  # noqa: E402 - import follows the sys.path bootstrap above
 import venv_prune  # noqa: E402 - import follows the sys.path bootstrap above
 
 from swgate_model import (  # noqa: E402 - same
@@ -56,7 +60,10 @@ def is_excluded(path: Path, excludes: Sequence[Path]) -> bool:
 
 
 def _walk(root: Path, excludes: Sequence[Path]) -> tuple[list[Path], list[Path]]:
-    """Every package dir, and every Swift file or Xcode project, under *root*."""
+    """Every package dir, and every Swift file or Xcode project, under *root*.
+
+    Another checkout below *root* is pruned whole; *root* itself is never judged one.
+    """
     packages: list[Path] = []
     swift: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -74,6 +81,7 @@ def _walk(root: Path, excludes: Sequence[Path]) -> tuple[list[Path], list[Path]]
             if name not in _PRUNED_DIRS
             and not name.endswith(_XCODE_SUFFIXES)
             and not venv_prune.is_virtualenv(base / name)
+            and not nested_checkout.is_nested_checkout(base / name)
             and not is_excluded(base / name, excludes)
         )
         if MANIFEST in filenames:

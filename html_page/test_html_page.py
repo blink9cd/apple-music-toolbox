@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The shared page frame: the escape, cells, tables, the summary, a section and the page.
+"""The shared page frame: the escape, cells, tables, the summary, a section, and the page.
 
 `html_page` is the tool-neutral half of an HTML report, imported by each tool that writes
 one, so these tests pin its own contract: what each piece takes and the markup it
@@ -126,7 +126,7 @@ class SectionTest(unittest.TestCase):
 
 
 class PageTest(unittest.TestCase):
-    """The whole document: head, header, main and footer, well formed."""
+    """The whole document: head, header, main, and footer, well formed."""
 
     def setUp(self) -> None:
         """A page with every part filled in."""
@@ -191,7 +191,7 @@ _CLEAN = (
 
 
 class ParsedPageTest(unittest.TestCase):
-    """The strict parse: what stays open, the ids, links, sources and text."""
+    """The strict parse: what stays open, the ids, links, sources, and text."""
 
     def test_it_records_ids_links_sources_and_text(self) -> None:
         parsed = html_page.ParsedPage(

@@ -34,6 +34,20 @@ _NON_STAR_SPELLINGS = (
 _LOAD_TESTS = "def load_tests(loader, tests, pattern):\n    return tests\n"
 
 
+# A split aggregator's load_tests, handing the selection to suite_select in each of the
+# two import spellings, with no discover call of the aggregator's own.
+_FOLDS_THROUGH_MODULE = (
+    "import os\nimport suite_select\n\n"
+    "def load_tests(loader, standard_tests, pattern):\n"
+    "    return suite_select.fold_selected(standard_tests, loader, DIR, os.environ)\n"
+)
+_FOLDS_THROUGH_NAME = (
+    "import os\nfrom suite_select import fold_selected\n\n"
+    "def load_tests(loader, standard_tests, pattern):\n"
+    "    return fold_selected(standard_tests, loader, DIR, os.environ)\n"
+)
+
+
 class SuiteOrphanReasonTests(unittest.TestCase):
     """Reporting a pruned tests/ whose suites nothing imports."""
 
@@ -135,6 +149,27 @@ class UnreachedSuitesTests(unittest.TestCase):
             self._unreached("found = loader.discover\n"),
             ["test_alpha.py", "test_beta.py"],
         )
+
+    def test_a_fold_selected_load_tests_reaches_every_suite(self) -> None:
+        """Regression: a split aggregator needs no discover of its own.
+
+        ``suite_select.fold_selected`` discovers every ``tests/test_*.py`` itself, so a
+        ``load_tests`` returning it reaches every suite in either import spelling.
+        """
+        for source in (_FOLDS_THROUGH_MODULE, _FOLDS_THROUGH_NAME):
+            with self.subTest(source=source):
+                self.assertEqual(self._unreached(source), [])
+
+    def test_naming_fold_selected_without_calling_it_reaches_nothing(self) -> None:
+        # Only a CALL hands the selection to suite_select; a binding or a string that
+        # mentions the name loads no test.
+        for source in (
+            "import suite_select\nfold = suite_select.fold_selected\n",
+            "from suite_select import fold_selected\nfold = fold_selected\n",
+            "NOTE = 'fold_selected(standard_tests, loader, DIR, os.environ)'\n",
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(self._unreached(source), _SUITES)
 
     def test_a_star_import_reaches_its_own_suite_only(self) -> None:
         # A star import binds the suite's TestCases into the aggregator's namespace,

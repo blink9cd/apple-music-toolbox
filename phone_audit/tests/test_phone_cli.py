@@ -351,6 +351,14 @@ class HelpTest(unittest.TestCase):
             with self.subTest(words=words):
                 self.assertIn(words, text)
 
+    def test_the_help_is_laid_out_by_the_shared_none_hiding_formatter(self) -> None:
+        # Pinned as a binding, not a rendering: on an interpreter past argparse's
+        # required-option fix, the stock formatter renders the same help.
+        self.assertIs(
+            pa.build_parser().formatter_class,
+            pa.help_formatter.RawNoneHidingFormatter,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

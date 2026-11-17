@@ -27,11 +27,79 @@ enum FileIO {
     return result
   }
 
-  /// Make `folder` and its parents, each new one private.
-  static func makeFolder(_ folder: URL) throws {
-    try FileManager.default.createDirectory(
-      at: folder, withIntermediateDirectories: true,
-      attributes: [.posixPermissions: privateFolderMode])
+  /// Make `folder` and its missing parents, each new one private (`openMadeFolder`).
+  ///
+  /// `owned`, the folder itself when nil, is the highest level the scrobbler treats as its
+  /// own: from it down, a link is refused.
+  static func makeFolder(_ folder: URL, owning owned: URL? = nil) throws(FileIOError) {
+    close(try openMadeFolder(folder, owning: owned ?? folder))
+  }
+
+  /// `folder`, made with each missing parent and returned open.
+  ///
+  /// `owned` is `folder` or a folder above it, and the levels above `owned` are the user's
+  /// own (the home folder, `Library`): those that exist are used as found, a link among
+  /// them included. Every level from `owned` down to `folder`, and any missing level above
+  /// `owned`, is made and opened inside the one above it without following a link
+  /// (`openLevel`), so a link at any of those levels, planted before or swapped in during
+  /// the walk, is refused. Both must be standardized absolute paths (`missingLevels`).
+  static func openMadeFolder(_ folder: URL, owning owned: URL) throws(FileIOError) -> Int32 {
+    let (base, names) = try missingLevels(of: folder, owning: owned)
+    var descriptor = try check(open(base.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC), "open folder")
+    for name in names {
+      let parent = descriptor
+      // The walk holds one descriptor at a time: each parent closes once its child opens.
+      defer { close(parent) }
+      descriptor = try openLevel(name, in: parent)
+    }
+    return descriptor
+  }
+
+  /// The folder `name` inside the open folder `parent`, made private when missing, and
+  /// opened without following a link, so a link where it belongs is refused.
+  ///
+  /// One that already exists is left as it is: whoever writes in it judges whose it is
+  /// and its mode (`openPrivateFolder`).
+  static func openLevel(_ name: String, in parent: Int32) throws(FileIOError) -> Int32 {
+    let made = mkdirat(parent, name, mode_t(privateFolderMode)) == 0
+    guard made || errno == EEXIST else { throw FileIOError(call: "mkdir", code: errno) }
+    // On macOS a link opened with O_DIRECTORY and O_NOFOLLOW fails ENOTDIR, on Linux ELOOP.
+    let flags = O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC
+    let descriptor = try check(openat(parent, name, flags), "open folder")
+    if made {
+      // mkdirat's mode is masked by the umask, which only ever clears bits, so the folder
+      // is never more open than 0700; this restores any bit the umask cleared for this
+      // user. A failure leaves it closed to every other user, so it is not an error.
+      _ = fchmod(descriptor, mode_t(privateFolderMode))
+    }
+    return descriptor
+  }
+
+  /// The folder the walk starts from, and the names below it down to `folder`.
+  ///
+  /// The start is the deepest existing level above `owned`, so `owned` and every level
+  /// below it are among the names, each then opened without following a link even when it
+  /// already exists. `folder` must be a standardized absolute path inside `owned`, with no
+  /// `..` among its components, since the walk climbs by dropping the last component; a
+  /// path that is not, or an `owned` with no level above it, is refused as `EINVAL`.
+  static func missingLevels(of folder: URL, owning owned: URL) throws(FileIOError)
+    -> (URL, [String])
+  {
+    let parts = folder.pathComponents
+    // How many components the path of the level just above `owned` has.
+    let floor = owned.pathComponents.count - 1
+    guard floor > 0, parts.starts(with: owned.pathComponents), !parts.contains("..") else {
+      throw FileIOError(call: "folder path", code: EINVAL)
+    }
+    var base = folder.deletingLastPathComponent()
+    var names = [folder.lastPathComponent]
+    var info = stat()
+    // lstat, so a link above `owned` counts as present and is then followed as found.
+    while base.pathComponents.count > floor || lstat(base.path, &info) != 0 {
+      names.insert(base.lastPathComponent, at: 0)
+      base = base.deletingLastPathComponent()
+    }
+    return (base, names)
   }
 
   /// Replace `url` with `data` so a reader sees the old file or the new one, never part of
@@ -60,7 +128,7 @@ enum FileIO {
   }
 
   /// Write every byte of `data`; `write` may take fewer than it was given.
-  private static func writeAll(_ data: Data, to descriptor: Int32) throws {
+  static func writeAll(_ data: Data, to descriptor: Int32) throws {
     try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) throws in
       var offset = 0
       while offset < raw.count {

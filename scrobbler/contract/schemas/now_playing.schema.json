@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://listensmith.invalid/contract/1/now_playing.schema.json",
   "title": "listensmith now-playing submission (playing_now)",
-  "$comment": "ListenBrainz's playing_now shape as pinned in common.schema.json, which forbids listened_at, plus ruling C2's player state. A display computes the live position as ls_position_seconds plus (now minus ls_measured_at) times ls_rate. Sent on every change and on the heartbeat while playing (C3); the relay marks the feed stale after the silence window (C4). Both timings are in defaults.json.",
+  "$comment": "ListenBrainz's playing_now shape as pinned in common.schema.json, which forbids listened_at, plus the player state. A display computes the live position as ls_position_seconds plus (now minus ls_measured_at) times ls_rate. Sent on every change and on the heartbeat while playing; the relay marks the feed stale after the silence window. Both timings are in defaults.json.",
   "type": "object",
   "required": ["listen_type", "payload"],
   "properties": {
@@ -34,24 +34,24 @@
       ],
       "properties": {
         "ls_position_seconds": {
-          "description": "Seconds into the track when ls_measured_at was read (ruling C2), up to the track duration's 24-day ceiling (ruling L2).",
+          "description": "Seconds into the track when ls_measured_at was read, up to the track duration's 24-day ceiling.",
           "type": "number",
           "minimum": 0,
           "maximum": 2073600
         },
         "ls_state": {
-          "description": "The player state (ruling C2).",
+          "description": "The player state.",
           "enum": ["playing", "paused", "buffering", "stopped"]
         },
         "ls_rate": {
-          "description": "Playback speed, for podcasts and audiobooks at other speeds; 1.0 when absent (ruling C2). At most 16 (ruling L6).",
+          "description": "Playback speed, for podcasts and audiobooks at other speeds; 1.0 when absent. At most 16.",
           "type": "number",
           "exclusiveMinimum": 0,
           "maximum": 16,
           "default": 1.0
         },
         "ls_measured_at": {
-          "description": "The Unix time, in seconds, at which ls_position_seconds was read (ruling C2), up to the last second of 9999-12-31 UTC (ruling L1).",
+          "description": "The Unix time, in seconds, at which ls_position_seconds was read, up to the last second of 9999-12-31 UTC.",
           "type": "number",
           "minimum": 1033430400,
           "maximum": 253402300799

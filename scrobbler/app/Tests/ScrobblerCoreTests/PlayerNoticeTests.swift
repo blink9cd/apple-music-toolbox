@@ -5,7 +5,7 @@ import Testing
 
 @Test func noticeParsesTheFieldsAPlayerInfoNoticeCarries() {
   let notice = PlayerNotice.parse([
-    "Player State": "Playing", "Persistent ID": "0A1B2C3D4E5F6071",
+    "Player State": "Playing", "PersistentID": "0A1B2C3D4E5F6071",
     "Name": "Harbor Lights at Noon", "Artist": "The Paper Lanterns",
     "Album": "Saltwater Almanac", "Total Time": 214000,
   ])
@@ -16,7 +16,7 @@ import Testing
 
 @Test func noticeKeepsEveryField() {
   let notice = PlayerNotice.parse([
-    "Player State": "Paused", "Persistent ID": NSNumber(value: Int64(0x0A1B_2C3D_4E5F_6071)),
+    "Player State": "Paused", "PersistentID": NSNumber(value: Int64(0x0A1B_2C3D_4E5F_6071)),
     "Name": "Harbor Lights at Noon", "Artist": "The Paper Lanterns",
     "Album": "Saltwater Almanac", "Total Time": NSNumber(value: 214000),
   ])
@@ -42,7 +42,7 @@ import Testing
 
 @Test func wronglyTypedFieldsAreDropped() {
   let notice = PlayerNotice.parse([
-    "Player State": "Playing", "Persistent ID": "not hex", "Name": 7, "Artist": ["x"],
+    "Player State": "Playing", "PersistentID": "not hex", "Name": 7, "Artist": ["x"],
     "Album": NSNull(), "Total Time": "214000",
   ])
   #expect(
@@ -73,4 +73,19 @@ import Testing
   let notice = PlayerNotice.parse(["Player State": "Playing", "Name": atCap, "Album": atCap + "a"])
   #expect(notice?.name == atCap)
   #expect(notice?.album == nil)
+}
+
+/// The keys Music's playerInfo notice carried on a live Mac (2026-11-13), with invented
+/// values. The track's ID is `PersistentID`, with no space: a parser reading
+/// `Persistent ID` dropped every notice while every test passed, because each fake
+/// copied the parser's spelling. This test is pinned to the observed spelling instead.
+@Test func noticeReadsTheTrackIDUnderTheKeyMusicSends() {
+  let notice = PlayerNotice.parse([
+    "Album": "Saltwater Almanac", "Artist": "The Paper Lanterns", "Genre": "Folk",
+    "Library PersistentID": NSNumber(value: Int64(0x1122_3344_5566_7788)),
+    "Name": "Harbor Lights at Noon",
+    "PersistentID": NSNumber(value: Int64(0x0A1B_2C3D_4E5F_6071)),
+    "Player State": "Playing", "Total Time": NSNumber(value: 214000),
+  ])
+  #expect(notice?.persistentID == "0A1B2C3D4E5F6071")
 }

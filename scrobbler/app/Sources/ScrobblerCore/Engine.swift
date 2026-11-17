@@ -50,7 +50,7 @@ public struct Engine: Sendable {
   /// sets the time too but not this, so a pause carries heard time only from a read: any
   /// process can post a notice, and notices alone must never add up to a listen.
   private var baseIsFromRead = false
-  /// Whether the last snapshot read was refused by the system.
+  /// Whether the system last refused to let the scrobbler script Music.
   private var denied = false
   /// Whether a restored play came back without its snapshot, so the first report of its
   /// track asks for it once more. A read that failed in this run is not retried: it would
@@ -77,6 +77,9 @@ public struct Engine: Sendable {
     case .snapshotFailed(_, let error, let time):
       observe(time)
       return applyReadFailure(error)
+    case .automation(let allowed, let time):
+      observe(time)
+      return applyAutomation(allowed: allowed)
     case .musicQuit(let time):
       observe(time)
       return closeAll(at: time)
@@ -287,6 +290,13 @@ public struct Engine: Sendable {
     guard error == .automationDenied, !denied else { return [] }
     denied = true
     return [.automationDenied(true)]
+  }
+
+  /// The system's word on scripting Music: each change of it is reported, and a repeat is not.
+  private mutating func applyAutomation(allowed: Bool) -> [EngineEffect] {
+    guard allowed == denied else { return [] }
+    denied = !allowed
+    return [.automationDenied(denied)]
   }
 
   /// Takes up a play saved before the app last stopped, and polls to learn what is playing.

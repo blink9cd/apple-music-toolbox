@@ -9,6 +9,8 @@ public enum SnapshotReadError: Error, Equatable {
   case automationDenied
   /// The result did not have the shape the script writes; the text says which part.
   case malformed(String)
+  /// Music did not answer within the script's time limit: busy, or held by a prompt.
+  case timedOut
   /// Music is running but stopped, so there is no current track to read.
   case noCurrentTrack
 }
@@ -206,7 +208,7 @@ public enum SnapshotParser {
     let label = field.rawValue
     switch field.kind {
     case .text:
-      return piece.isEmpty ? nil : FieldText.capped(String(piece)).map(FieldValue.text)
+      return piece.isEmpty ? nil : FieldText.decoded(piece).map(FieldValue.text)
     case .persistentID:
       return try FieldText.persistentID(piece, label: label).map(FieldValue.text)
     case .count:
@@ -232,15 +234,58 @@ enum FieldText {
   /// and record.
   static let maxTextBytes = 4096
 
+  /// An escape is three bytes standing for one, so a piece longer than this cannot decode
+  /// to a field within `maxTextBytes`.
+  static let maxEscapedBytes = 3 * maxTextBytes
+
   /// `text`, or nil when it is longer than `maxTextBytes`.
   static func capped(_ text: String?) -> String? {
     guard let text, text.utf8.count <= maxTextBytes else { return nil }
     return text
   }
 
+  /// A text field's piece decoded and capped; a piece past `maxEscapedBytes` is dropped
+  /// before it is decoded, since what it decodes to would be dropped anyway.
+  static func decoded(_ piece: Substring) -> String? {
+    guard piece.utf8.count <= maxEscapedBytes else { return nil }
+    return capped(unescaped(piece))
+  }
+
   /// The result's fields, keeping empty ones so the count stays exact.
   static func split(_ text: String) -> [Substring] {
     text.split(separator: MusicScripts.separator, omittingEmptySubsequences: false)
+  }
+
+  /// Each escape the snapshot script writes, by its two hex digits, and the character it
+  /// stands for.
+  static let escapes: [String: Unicode.Scalar] = [
+    "25": "%", "1F": "\u{1F}", "09": "\t", "0A": "\n", "0D": "\r",
+  ]
+
+  /// A text field with every escape undone, read left to right in one pass, so the `%09`
+  /// that `%2509` leaves once its sign is read is never read again.
+  ///
+  /// Scalar by scalar, never by `Character`, which would fuse a sign with a following
+  /// combining mark. A sign that begins no escape is kept, so it never fails.
+  static func unescaped(_ piece: Substring) -> String {
+    let scalars = Array(piece.unicodeScalars)
+    var out = String.UnicodeScalarView()
+    var index = 0
+    while index < scalars.count {
+      if scalars[index] == "%", let escaped = escapes[code(after: index, in: scalars)] {
+        out.append(escaped)
+        index += 3
+      } else {
+        out.append(scalars[index])
+        index += 1
+      }
+    }
+    return String(out)
+  }
+
+  /// The up to two scalars after `index`, as a key into `escapes`.
+  private static func code(after index: Int, in scalars: [Unicode.Scalar]) -> String {
+    String(String.UnicodeScalarView(scalars.dropFirst(index + 1).prefix(2)))
   }
 
   /// A whole number that cannot be negative.

@@ -9,15 +9,26 @@ from __future__ import annotations
 
 import sys
 import unittest
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+_HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(_HERE), str(_HERE.parent / "src")]
 
+import _play_count_baseline_fuzz_profile  # noqa: E402, F401 - loads the deterministic profile before any @given
+import baseline_fixtures as fx  # noqa: E402 - import follows the sys.path bootstrap above
 import baseline_rows as br  # noqa: E402 - import follows the sys.path bootstrap above
 
+#: Text rich in what the escape and the row shape turn on: every escaped character, the
+#: digits and letters an escape's code is spelled with, a path's slash and a combining
+#: mark, mixed with any character at all.
+_RICH_TEXT = st.text(
+    alphabet=st.sampled_from("%\t\n\r\x1f0129ADF/\u0301") | st.characters()
+)
 #: Every field of one well-formed row, invented, in the listing's order.
 _FIELDS = {
     "pid": "0123456789abcdef",
@@ -121,13 +132,55 @@ class ParsePlayRowsTest(unittest.TestCase):
         parsed = br.parse_play_rows(_row() + _row().rstrip("\n"))
         self.assertEqual(parsed, br.ParsedRows((_EXPECTED,), 1))
 
-    @given(st.text())
+    @given(_RICH_TEXT)
     def test_fuzz_parse_play_rows(self, text: str) -> None:
         parsed = br.parse_play_rows(text)
         self.assertLessEqual(len(parsed.rows) + parsed.unparsed, text.count("\n") + 1)
         for track in parsed.rows:
             self.assertGreaterEqual(track.played_count, 0)
             self.assertTrue(track.path == "" or track.path.startswith("/"))
+
+
+#: Every character the script escapes, the pair Windows text ends lines with, an
+#: escape's own text left as plain text, and a sign followed by an unknown code.
+_AWKWARD = ("\t", "\n", "\r", "\r\n", "\x1f", "%", "%09", "%25", "%41", "100%")
+#: The text fields the script escapes, each with the invented track holding a value there.
+_TEXT_FIELDS: dict[str, Callable[[str], br.RawTrack]] = {
+    "name": lambda value: replace(fx.INVENTED_TRACK, name=value),
+    "artist": lambda value: replace(fx.INVENTED_TRACK, artist=value),
+    "album": lambda value: replace(fx.INVENTED_TRACK, album=value),
+    "album_artist": lambda value: replace(fx.INVENTED_TRACK, album_artist=value),
+    "genre": lambda value: replace(fx.INVENTED_TRACK, genre=value),
+}
+#: A path an awkward character is placed in the middle of.
+_PATH = "/Invented/Library/Invented{}Song.m4a"
+
+
+class EscapedFieldsTest(unittest.TestCase):
+    """A text field or path holding a delimiter, or the escape sign, reads back exactly."""
+
+    def test_each_awkward_character_reads_back_in_each_text_field(self) -> None:
+        for field, track_with in _TEXT_FIELDS.items():
+            for awkward in _AWKWARD:
+                track = track_with(f"Invented{awkward}Song")
+                with self.subTest(field=field, awkward=awkward):
+                    parsed = br.parse_play_rows(fx.row_of(track) + "\n")
+                    self.assertEqual(parsed, br.ParsedRows((track,), 0))
+
+    def test_each_awkward_character_reads_back_in_a_path(self) -> None:
+        for awkward in _AWKWARD:
+            track = replace(fx.INVENTED_TRACK, path=_PATH.format(awkward))
+            with self.subTest(awkward=awkward):
+                parsed = br.parse_play_rows(fx.row_of(track) + "\n")
+                self.assertEqual(parsed, br.ParsedRows((track,), 0))
+
+    @given(_RICH_TEXT, _RICH_TEXT, _RICH_TEXT.filter(lambda path: "\x00" not in path))
+    def test_any_text_and_path_read_back(
+        self, name: str, artist: str, path: str
+    ) -> None:
+        track = replace(fx.INVENTED_TRACK, name=name, artist=artist, path="/" + path)
+        parsed = br.parse_play_rows(fx.row_of(track) + "\n")
+        self.assertEqual(parsed, br.ParsedRows((track,), 0))
 
 
 if __name__ == "__main__":

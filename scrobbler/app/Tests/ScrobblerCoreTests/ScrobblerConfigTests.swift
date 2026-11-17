@@ -130,6 +130,23 @@ func aFileThatIsNotAnObjectIsRefused(text: String) {
   #expect(throws: ConfigError.unreadable) { try ScrobblerConfig.load(from: url) }
 }
 
+@Test func aSymlinkToAGoodConfigIsUnreadable() throws {
+  let temp = try TempFolder()
+  let target = temp.child("elsewhere.json")
+  try writeFile(#"{"store_port": 50000}"#, to: target)
+  let url = temp.child("scrobbler.json")
+  try FileManager.default.createSymbolicLink(at: url, withDestinationURL: target)
+  #expect(throws: ConfigError.unreadable) { try ScrobblerConfig.load(from: url) }
+}
+
+@Test func aDanglingSymlinkIsUnreadableNotAbsent() throws {
+  let temp = try TempFolder()
+  let url = temp.child("scrobbler.json")
+  try FileManager.default.createSymbolicLink(
+    at: url, withDestinationURL: temp.child("missing.json"))
+  #expect(throws: ConfigError.unreadable) { try ScrobblerConfig.load(from: url) }
+}
+
 @Test func aConfigOverTheCapIsUnreadable() throws {
   let padding = String(repeating: " ", count: ScrobblerConfig.maxFileBytes)
   #expect(throws: ConfigError.unreadable) { try load("{" + padding + "}") }

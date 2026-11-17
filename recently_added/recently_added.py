@@ -48,8 +48,9 @@ import datetime as dt
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import NamedTuple
 
 # The shared bounded-subprocess-runner library, at one fixed place: directly under the
@@ -112,6 +113,76 @@ _ROW_TERMINATOR = "\n"
 # decimal digit.
 _ISOT_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 
+# The handlers that escape a name before it is printed: `escapedText` writes each percent
+# sign, U+001F, tab, linefeed and carriage return as a percent sign and its two hex
+# digits, and `_unescape_field` undoes it. Text item passes do the common case; a
+# delimiter followed by a combining mark is one character to AppleScript's search, so
+# the handler then checks code points and rebuilds such text from them. A copy of the
+# toolbox's shared escape (tag_refresh's `src/script_text.py`, whose comment gives the
+# measurements), not an import of it: media_feeds imports this module from a toolbox
+# whose ownership it checks folder by folder, and those checks cover this folder and
+# album_stats only. `tests/test_escaped_rows.py` pins this copy to the shared one, and
+# tag_refresh's osascript suite runs the handler as cut from `_MUSIC_SCRIPT`.
+_ESCAPE_HANDLER = """on escapedText(theText)
+  if theText is missing value then return ""
+  set savedDelimiters to AppleScript's text item delimiters
+  set escapePairs to {{"%", "%25"}, {return & linefeed, "%0D%0A"}}
+  set escapePairs to escapePairs & {{return, "%0D"}, {linefeed, "%0A"}}
+  set escapePairs to escapePairs & {{tab, "%09"}, {character id 31, "%1F"}}
+  repeat with escapePair in escapePairs
+    set AppleScript's text item delimiters to item 1 of escapePair
+    set theParts to text items of theText
+    set AppleScript's text item delimiters to item 2 of escapePair
+    set theText to theParts as text
+  end repeat
+  set AppleScript's text item delimiters to savedDelimiters
+  set codePoints to id of theText
+  if class of codePoints is not list then set codePoints to {codePoints}
+  if codePoints contains 9 or codePoints contains 10 then return my escapedPoints(codePoints)
+  if codePoints contains 13 or codePoints contains 31 then return my escapedPoints(codePoints)
+  return theText
+end escapedText
+
+on escapedPoints(codePoints)
+  if codePoints is {} then return ""
+  script pointStore
+    property pts : codePoints
+    property outs : {}
+  end script
+  repeat with i from 1 to count of pointStore's pts
+    set pointValue to item i of pointStore's pts
+    if pointValue is 9 then
+      set end of pointStore's outs to 37
+      set end of pointStore's outs to 48
+      set end of pointStore's outs to 57
+    else if pointValue is 10 then
+      set end of pointStore's outs to 37
+      set end of pointStore's outs to 48
+      set end of pointStore's outs to 65
+    else if pointValue is 13 then
+      set end of pointStore's outs to 37
+      set end of pointStore's outs to 48
+      set end of pointStore's outs to 68
+    else if pointValue is 31 then
+      set end of pointStore's outs to 37
+      set end of pointStore's outs to 49
+      set end of pointStore's outs to 70
+    else
+      set end of pointStore's outs to pointValue
+    end if
+  end repeat
+  return string id (pointStore's outs)
+end escapedPoints
+"""
+
+# Each escape `escapedText` writes, and the character it stands for.
+_ESCAPES: Mapping[str, str] = MappingProxyType(
+    {f"%{ord(char):02X}": char for char in "%\x1f\t\n\r"}
+)
+# Any one of `_ESCAPES`, matched left to right in one pass, so the `%09` that `%2509`
+# leaves once its sign is read is never read again.
+_ESCAPE = re.compile("|".join(_ESCAPES))
+
 # Emits one line per recently-added track (not album: Music.app has no per-album
 # "date added", and the newest track's stamp is what the whole tool means by "when the
 # album was added"): an ISO-8601 "date added", a tab, the album artist, a tab, the
@@ -120,16 +191,24 @@ _ISOT_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}
 # spelling of a date and ranks by the parsed value rather than by these characters.
 # Tab is the field separator, not "|", which has appeared in band names,
 # and AppleScript's own `tab`/`linefeed` keywords supply it. Only the integer lookback
-# is interpolated into the script; track text never is, so it needs no escaping.
-_MUSIC_SCRIPT = f"""tell application "Music"
+# is interpolated into the script; track text never is, so the script's source needs
+# no escaping. The text the script prints does: the album artist and the album go
+# through `escapedText` (`_ESCAPE_HANDLER`), so a tab or line break in a tag can
+# neither split its row nor forge a row of its own, and `_rank_albums` reads each name
+# back exactly.
+_MUSIC_SCRIPT = (
+    _ESCAPE_HANDLER
+    + f"""
+tell application "Music"
     set cutoff to (current date) - ({_MUSIC_LOOKBACK_DAYS} * days)
     set recentTracks to (every track of library playlist 1 whose date added > cutoff)
     set output to ""
     repeat with t in recentTracks
-        set output to output & ((date added of t) as «class isot» as string) & tab & (album artist of t) & tab & (album of t) & linefeed
+        set output to output & ((date added of t) as «class isot» as string) & tab & (my escapedText(album artist of t)) & tab & (my escapedText(album of t)) & linefeed
     end repeat
     return output
 end tell"""
+)
 
 
 def _real_run(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -158,6 +237,15 @@ def _real_run(args: list[str], timeout: float) -> subprocess.CompletedProcess[st
     )
 
 
+def _unescape_field(text: str) -> str:
+    """*text* with every one of `_ESCAPES` replaced by the character it stands for.
+
+    Never raises: a percent sign that begins no escape is kept as it is, so a sign the
+    script left unescaped (one fused with a following combining mark) still reads.
+    """
+    return _ESCAPE.sub(lambda found: _ESCAPES[found.group(0)], text)
+
+
 def _rank_albums(text: str, count: int, *, today: dt.date) -> list[AlbumRef]:
     """Collapse Music.app's per-track rows into per-album ones, then rank.
 
@@ -183,19 +271,17 @@ def _rank_albums(text: str, count: int, *, today: dt.date) -> list[AlbumRef]:
     make the parser's own refusal dead: `2000-13-45T99:99:99` matches the shape and names
     a thirteenth month.
 
-    Two more rows are refused, and the reason is the same for both: the AppleScript
-    concatenates each tag's text unescaped, so a tag can carry anything, including
-    the row terminator itself. A row holding a NUL cannot name a real track, and a
-    name with one in it cannot be handed to a subprocess at all: the per-album
-    counts query built from it would be refused before it ran. A row dated more
-    than `_FUTURE_SLACK` past `today` cannot have been added yet: a tag holding a
-    line break followed by `date<TAB>artist<TAB>album` reads as a row of its own,
-    with a date its author chose, and dated far enough ahead it ranked newest
-    forever, over every real addition. The residual is stated plainly: the
-    text-mode capture turns CR and CRLF into LF before this function sees them, so
-    a CR or LF inside a tag still ends a row. What the date check removes is the one
-    power injection adds (a date the tag's author picks), while the text a forged
-    row carries is text a crafted tag could already have carried on its own.
+    The AppleScript escapes each name (`_ESCAPE_HANDLER`), so a tab, line break,
+    U+001F or percent sign in a tag stays inside its own field, and each name is read
+    back with `_unescape_field` after the row splits into its three fields: a tag
+    holding a line break followed by `date<TAB>artist<TAB>album` is one album name,
+    not a row of its own. Two more rows are refused all the same, as defense in depth
+    for a reply this script did not write. A row holding a NUL cannot name a real
+    track, and a name with one in it cannot be handed to a subprocess at all: the
+    per-album counts query built from it would be refused before it ran. A row dated
+    more than `_FUTURE_SLACK` past `today` cannot have been added yet; were a forged
+    row ever to arrive, dated far enough ahead it would rank newest forever, over every
+    real addition.
 
     `today` is a parameter rather than a clock read so this function stays pure:
     a row's distance from "today" is then a property of the test, not of the day
@@ -219,7 +305,8 @@ def _rank_albums(text: str, count: int, *, today: dt.date) -> list[AlbumRef]:
         fields = line.split("\t")
         if len(fields) != 3:
             continue
-        added_isot, artist, album = fields
+        added_isot = fields[0]
+        artist, album = _unescape_field(fields[1]), _unescape_field(fields[2])
         if not artist.strip() or not album.strip():
             continue
         if not _ISOT_STAMP.fullmatch(added_isot):

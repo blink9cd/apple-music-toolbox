@@ -11,7 +11,7 @@ reaches all of them.
 
 It names no tool and no check: each tool's own page module supplies its title, header,
 sections and read-only line. The page holds inline CSS and nothing else: no script, and
-nothing a browser would fetch (no font, image or stylesheet), so it reads the same
+nothing a browser would fetch (no font, image, or stylesheet), so it reads the same
 offline.
 
 Every value from outside goes through `escaped`: first `shown` (a control character as a
@@ -108,7 +108,7 @@ footer { padding-top: 24px; padding-bottom: 48px; font-size: 14px; }
 
 # --- Text from outside -------------------------------------------------------------
 
-#: C0 controls, DEL and C1 controls, each shown as its ``\\xNN`` escape.
+#: C0 controls, DEL, and C1 controls, each shown as its ``\\xNN`` escape.
 _CONTROLS = {code: f"\\x{code:02x}" for code in (*range(0x20), *range(0x7F, 0xA0))}
 
 
@@ -376,7 +376,7 @@ class ParsedPage(HTMLParser):
     ``sources`` (each URL-bearing attribute, as ``name=value``), ``handlers`` (each
     ``on*`` attribute, as its tag and name), ``styles`` (each ``style`` attribute),
     ``repeated`` (each attribute given twice on one element, as its tag and name),
-    ``sheets`` (each style element's content), ``values``, ``markup`` and ``text`` are
+    ``sheets`` (each style element's content), ``values``, ``markup``, and ``text`` are
     recorded in page order. Of an attribute given twice, its first value is the one
     recorded, as a browser keeps it. ``values`` is each attribute's value with its
     character references decoded; ``markup`` is each start tag as written, each

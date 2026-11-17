@@ -40,17 +40,28 @@ class _CliCase(unittest.TestCase):
         runner: StagedRunner,
         *,
         swift: str | None = "/usr/bin/swift",
+        path: Path | None = None,
+        home: Path | None = None,
     ) -> tuple[int, str, str]:
-        """Run main with the seam faked and the toolchain lookup patched."""
+        """Run main with the seam faked and the toolchain lookup patched.
+
+        *path* defaults to the temp tree, and *home*, when given, stands in for the
+        running user's home.
+        """
         out, err = io.StringIO(), io.StringIO()
-        argv = ["--path", str(self.root), "--scratch-path", str(self.base), *extra]
+        target = self.root if path is None else path
+        argv = ["--path", str(target), "--scratch-path", str(self.base), *extra]
         with (
             mock.patch.object(swift_gate, "_run_swift", runner),
             mock.patch.object(swift_gate, "locate_swift", return_value=swift),
             redirect_stdout(out),
             redirect_stderr(err),
         ):
-            code = swift_gate.main(argv)
+            code = (
+                swift_gate.main(argv)
+                if home is None
+                else swift_gate.main(argv, home=home)
+            )
         return code, out.getvalue(), err.getvalue()
 
 
@@ -155,6 +166,112 @@ class ExitCodeTests(_CliCase):
         with self.assertRaises(SystemExit) as ctx, redirect_stderr(io.StringIO()):
             swift_gate.main(["--path", str(self.root / "missing")])
         self.assertEqual(ctx.exception.code, 2)
+
+
+def _error_line(text: str) -> str:
+    """The one ``ERROR:`` line in *text*."""
+    lines = [line for line in text.splitlines() if line.startswith("ERROR:")]
+    assert len(lines) == 1, text
+    return lines[0]
+
+
+class ScratchFailureTests(_CliCase):
+    """A scratch-directory failure is named as one, not as a swift launch."""
+
+    def test_an_uncreatable_scratch_dir_exits_two_naming_it(self) -> None:
+        blocker = write(
+            self.root / "blocker", ""
+        )  # a file where the base dir should be
+        runner = StagedRunner()
+        code, out, _ = self.main(["--scratch-path", str(blocker)], runner)
+        self.assertEqual(code, 2)
+        line = _error_line(out)
+        self.assertEqual(
+            line,
+            "ERROR: could not create the scratch directory: "
+            "NotADirectoryError: Not a directory",
+        )
+        self.assertNotIn(str(self.root), line)
+        self.assertEqual(runner.calls, [])  # no swift call before the scratch exists
+
+    def test_a_failed_stale_report_sweep_exits_two_naming_it(self) -> None:
+        scratch = swgate_stages.scratch_for(self.pkg, self.base)
+        stale = write(scratch / "codecov" / "Old.json", "{}")
+        denied = PermissionError(13, "Permission denied", str(stale))
+        with mock.patch.object(Path, "unlink", side_effect=denied):
+            code, out, _ = self.main([], StagedRunner())
+        self.assertEqual(code, 2)
+        line = _error_line(out)
+        self.assertEqual(
+            line,
+            "ERROR: could not clear the scratch directory: "
+            "PermissionError: Permission denied",
+        )
+        self.assertNotIn(str(self.root), line)
+
+    def test_a_swift_launch_failure_still_says_could_not_run_swift(self) -> None:
+        missing = FileNotFoundError(2, "No such file or directory", "/opt/x/swift")
+        code, out, _ = self.main([], StagedRunner(raises={"dump-package": missing}))
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            _error_line(out),
+            "ERROR: could not run swift: FileNotFoundError: No such file or directory",
+        )
+
+    def test_the_scratch_dir_exists_before_the_first_swift_call(self) -> None:
+        scratch = swgate_stages.scratch_for(self.pkg, self.base)
+        seen: list[bool] = []
+
+        def runner(
+            argv: list[str], *, cwd: Path, timeout: float
+        ) -> subprocess.CompletedProcess[str]:
+            del cwd, timeout  # only the scratch dir's existence is under test
+            seen.append(scratch.is_dir())
+            return subprocess.CompletedProcess(argv, 1, "", "stop here")
+
+        code, _, _ = self.main([], runner)  # type: ignore[arg-type]  # a bare fake
+        self.assertEqual(code, 1)
+        self.assertEqual(seen, [True])
+
+
+class HomeRenderingTests(_CliCase):
+    """Every package path a message names is shown from ``~`` under the home."""
+
+    def test_the_report_header_under_home_is_shown_from_tilde(self) -> None:
+        home = self.root.parent
+        runner = StagedRunner(outcomes=[("build --build-tests", 1, "error: x")])
+        code, out, _ = self.main([], runner, home=home)
+        self.assertEqual(code, 1)
+        self.assertIn(f"== ~/{self.root.name}/pkg\n", out)
+        self.assertNotIn(str(self.pkg), out)
+
+    def test_the_report_header_outside_home_is_shown_as_given(self) -> None:
+        runner = StagedRunner(outcomes=[("build --build-tests", 1, "error: x")])
+        code, out, _ = self.main([], runner, home=Path("/elsewhere-home"))
+        self.assertEqual(code, 1)
+        self.assertIn(f"== {self.pkg}\n", out)
+
+    def test_the_no_swift_line_under_home_is_shown_from_tilde(self) -> None:
+        empty = self.root / "empty"
+        empty.mkdir()
+        code, out, _ = self.main([], StagedRunner(), path=empty, home=self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "~/empty: no Swift found; nothing to gate (skipped).\n")
+
+    def test_the_refusal_under_home_is_shown_from_tilde(self) -> None:
+        loose = self.root / "loose"
+        write(loose / "Main.swift", "")
+        code, _, err = self.main([], StagedRunner(), path=loose, home=self.root)
+        self.assertEqual(code, 2)
+        self.assertIn("no Package.swift owns Main.swift under ~/loose\n", err)
+        self.assertNotIn(str(loose), err)
+
+    def test_the_home_defaults_to_the_running_users(self) -> None:
+        empty = self.root / "empty"
+        empty.mkdir()
+        with mock.patch.object(Path, "home", return_value=self.root):
+            _, out, _ = self.main([], StagedRunner(), path=empty)
+        self.assertIn("~/empty: no Swift found", out)
 
 
 class ToolchainTests(unittest.TestCase):

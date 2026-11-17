@@ -26,18 +26,16 @@ from typing import cast
 
 import html_page
 import phone_compare
-from html_page import Cell, Row, escaped
+from html_page import Cell, Row
+from report_html import DASH, Item, item_of, number_cell, text_cell
 
-#: The report object, as `report_dict` builds it, and one listed item of it.
+#: The report object, as `report_dict` builds it.
 Report = Mapping[str, object]
-Item = Mapping[str, object]
 
 #: The page's title.
 TITLE = "Phone audit"
 #: The footer's line.
 READ_ONLY = "Read-only: nothing on the iPhone was changed."
-#: What a cell with no value shows: a size the database does not hold, say.
-_DASH = "—"
 #: The classes of a no-file row: the first of its album, or one grouped beneath it.
 ALBUM_FIRST, ALBUM_REST = "album-first", "album-rest"
 
@@ -65,32 +63,17 @@ _FIGURES = (
 # --- Cells ---------------------------------------------------------------------------
 
 
-def _item(value: object) -> Item:
-    """One listed item of the report, as `report_dict` built it."""
-    return cast("Item", value)
-
-
-def _text(value: object) -> Cell:
-    """A text cell."""
-    return Cell(escaped(value))
-
-
-def _number(value: object) -> Cell:
-    """A number cell, set in even-width figures; None reads as a dash."""
-    return Cell(_DASH) if value is None else Cell(escaped(value), numeric=True)
-
-
 def _file(item: Item) -> Cell:
     """The phone file, as its sync folder and name: ``F00/ABCD.mp3``."""
-    return _text(f"{item['folder']}/{item['name']}")
+    return text_cell(f"{item['folder']}/{item['name']}")
 
 
 def _track(item: Item) -> Row:
     """A row's disc, track, title and phone file, after its artist and album."""
     return (
-        _number(item["disc"]),
-        _number(item["track"]),
-        _text(item["title"]),
+        number_cell(item["disc"]),
+        number_cell(item["track"]),
+        text_cell(item["title"]),
         _file(item),
     )
 
@@ -115,7 +98,7 @@ def _phone_row(item: Item) -> phone_compare.PhoneRow:
 
 def _named(value: object) -> Cell:
     """An album's name on its first row; an empty one reads as a dash, not a blank."""
-    return _text(value) if value else Cell(_DASH)
+    return text_cell(value) if value else Cell(DASH)
 
 
 def _album_rows(items: Sequence[Item]) -> tuple[list[Row], list[str | None]]:
@@ -147,17 +130,17 @@ def _no_file_table(items: Sequence[Item], columns: Sequence[str]) -> list[str]:
 def _size_row(item: Item) -> Row:
     """A row whose file's size differs: who, what, where, and the two sizes."""
     return (
-        _text(item["artist"]),
-        _text(item["album"]),
+        text_cell(item["artist"]),
+        text_cell(item["album"]),
         *_track(item),
-        _number(item["phone_size"]),
-        _number(item["database_size"]),
+        number_cell(item["phone_size"]),
+        number_cell(item["database_size"]),
     )
 
 
 def _no_row_row(item: Item) -> Row:
     """A file with no row: where, and its size."""
-    return (_file(item), _number(item["size"]))
+    return (_file(item), number_cell(item["size"]))
 
 
 def _plain_table(
@@ -225,7 +208,7 @@ SECTIONS = (
 
 def _items(report: Report, section: Section) -> list[Item]:
     """*section*'s listed items."""
-    return [_item(value) for value in cast("list[object]", report[section.key])]
+    return [item_of(value) for value in cast("list[object]", report[section.key])]
 
 
 def _section(report: Report, section: Section) -> list[str]:
@@ -249,8 +232,8 @@ def _summary(report: Report) -> list[str]:
 
 def _figures(report: Report) -> list[str]:
     """The summary figures: findings, then every count, in a table."""
-    summary = _item(report["summary"])
-    rows = [(Cell(label), _number(summary[key])) for label, key in _FIGURES]
+    summary = item_of(report["summary"])
+    rows = [(Cell(label), number_cell(summary[key])) for label, key in _FIGURES]
     return [
         '<section id="figures">',
         "<h2>Summary figures</h2>",

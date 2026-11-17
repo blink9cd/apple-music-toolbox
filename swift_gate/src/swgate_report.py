@@ -1,14 +1,18 @@
 """Render the per-package results as text or JSON, with the family's one-line trailer.
 
-Private to ``swift_gate``. Pure: results in, a string out; the CLI owns every write.
+Private to ``swift_gate``. Pure: results in, a string out; the CLI owns every write. The
+text report shows each package from ``~`` when it sits under the home the CLI passes; the
+JSON keeps the resolved path, for a reader that opens it.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from pathlib import Path
 
 from swgate_model import Finding, GateResult, Subject
+from swgate_signing import render_path
 
 JSON_INDENT = 2
 
@@ -35,9 +39,9 @@ def _package_dict(subject: Subject, result: GateResult) -> dict[str, object]:
     }
 
 
-def _package_lines(subject: Subject, result: GateResult) -> list[str]:
-    """One package's findings, misses, detail and verdict as report lines."""
-    lines = [f"== {subject.root}"]
+def _package_lines(subject: Subject, result: GateResult, home: Path) -> list[str]:
+    """One package's header, findings, misses, detail and verdict as report lines."""
+    lines = [f"== {render_path(subject.root, home)}"]
     for f in result.findings:
         where = f"{f.path}:{f.line}" if f.line else f.path
         lines.append(f"{f.code} {where}: {f.message}")
@@ -57,8 +61,9 @@ def format_results(
     min_percent: float,
     *,
     as_json: bool,
+    home: Path,
 ) -> str:
-    """Every package's result, then the overall verdict."""
+    """Every package's result, then the overall verdict; *home* is shown as ``~``."""
     code = max((result.returncode for _, result in results), default=0)
     if as_json:
         return json.dumps(
@@ -71,7 +76,7 @@ def format_results(
         )
     lines: list[str] = []
     for subject, result in results:
-        lines.extend(_package_lines(subject, result))
+        lines.extend(_package_lines(subject, result, home))
     verdict = "PASS" if code == 0 else "FAIL"
     lines.append(
         f"Gated {len(results)} SwiftPM package(s) at >= {min_percent:g}% regions.\n"

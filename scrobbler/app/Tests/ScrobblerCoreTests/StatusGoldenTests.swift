@@ -27,6 +27,7 @@ private func everyFieldSet() throws -> StatusSnapshot {
   status.lastSendError = "store unreachable"
   status.unrecordableCount = 4
   status.automationDenied = true
+  status.automationAskedAt = 1_795_000_590.5
   status.nowPlaying = try RecordCoding.decode(NowPlayingRecord.self, from: minimalNowPlaying())
   return status
 }

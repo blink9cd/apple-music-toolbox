@@ -34,6 +34,7 @@ EXPECTED = {
         last_sent_at=1_795_000_400.0,
         last_send_error="store unreachable",
         automation_denied=True,
+        automation_asked_at=1_795_000_590.5,
     ),
     "status-optionals-null.json": scrob_status.AppStatus(
         version="9.8.7",
@@ -46,6 +47,7 @@ EXPECTED = {
         last_sent_at=None,
         last_send_error=None,
         automation_denied=False,
+        automation_asked_at=None,
     ),
 }
 

@@ -23,12 +23,12 @@ import refresh_core as rc  # noqa: E402 - import follows the sys.path bootstrap 
 import refresh_fixtures as rf  # noqa: E402 - import follows the sys.path bootstrap above
 
 settings.register_profile(
-    "fuzz_gate_deterministic",
+    "deterministic",
     derandomize=True,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
-settings.load_profile("fuzz_gate_deterministic")
+settings.load_profile("deterministic")
 
 # os.geteuid exists only off Windows, so it is looked up; root reads a folder whose
 # permissions refuse it, so the unreadable-folder test skips under it.

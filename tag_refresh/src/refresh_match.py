@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from refresh_core import FileKey, Mp3, StatFn
+from script_text import unescape_field
 
 #: The one row terminator. Never ``splitlines``, which also breaks on
 #: ``\v \f \x1c-\x1e \x85 U+2028 U+2029`` and so would split a path holding one.
@@ -24,19 +25,20 @@ _FIRST_TRACK_ID = 1
 #: Music's track ids are small positive integers; 18 digits bounds an id below 10**18
 #: so a row cannot make the parser build an arbitrarily large integer.
 _MAX_ID_DIGITS = 18
-#: A lookup row: a decimal id from 1 with no leading zero (as Music prints it, and so
-#: never 0, which a row forged through a name holding a linefeed could carry), a
-#: 16-digit hex persistent ID, an absolute path, tab separated. Music emits the ID in uppercase; either case is read, to agree with the
-#: refresh call's own check of the pairs it is handed. ``[0-9]``, never ``\d``, which
-#: takes every Unicode digit, and the path refuses a tab (a field boundary), a CR (a text-mode read turns one into a
-#: linefeed, so it cannot be trusted to be data) and a NUL (``os.stat`` raises on it).
+#: A lookup row: a decimal id from 1 with no leading zero (as Music prints it), a
+#: 16-digit hex persistent ID, and an absolute path, escaped, tab separated. Music
+#: emits the ID in uppercase; either case is read, to agree with the refresh call's own
+#: check of the pairs it is handed. ``[0-9]``, never ``\d``, which takes every Unicode
+#: digit. The escaped path holds no raw tab (a field boundary) or CR (a text-mode read
+#: turns one into a linefeed), and no NUL (``os.stat`` raises on it); its escapes are
+#: read back once the row has matched.
 _ROW = re.compile(
     rf"([1-9][0-9]{{0,{_MAX_ID_DIGITS - 1}}})\t([0-9A-Fa-f]{{16}})\t(/[^\t\r\x00]*)"
 )
 #: The persistent ID's shape alone, for `is_row`.
 _PERSISTENT_ID = re.compile(r"[0-9A-Fa-f]{16}")
-#: The characters a returned row's path may never hold.
-_ROW_PATH_FORBIDDEN = frozenset("\t\n\r\x00")
+#: What a returned row's decoded path may never hold: no escape stands for a NUL.
+_ROW_PATH_FORBIDDEN = frozenset("\x00")
 
 
 @dataclass(frozen=True)
@@ -81,9 +83,10 @@ def parse_rows(text: str) -> ParsedRows:
     A row ends only at a linefeed and is a decimal id of at least 1, a 16-digit hex
     persistent ID and an absolute path, tab separated. Empty segments are skipped
     (``osascript`` adds a linefeed of its own after the last row's); a final segment
-    with no linefeed is counted, as a row cut short. A path is emitted unescaped, so a
-    path holding a linefeed can split into rows of its author's choosing: that is why
-    `match_tracks` trusts no row's text, only what its path stats to.
+    with no linefeed is counted, as a row cut short. The script escapes the path, so a
+    tab, line break, U+001F or percent sign in it stays inside its own row, and
+    `unescape_field` reads it back after the row matches; a path can no longer forge
+    a row. `match_tracks` still trusts no row's text, only what its path stats to.
     """
     *terminated, tail = text.split(_TERMINATOR)
     rows: list[Row] = []
@@ -96,7 +99,7 @@ def parse_rows(text: str) -> ParsedRows:
             unparsed += 1
             continue
         track_id, persistent_id, path = found.groups()
-        rows.append(Row(int(track_id), persistent_id, path))
+        rows.append(Row(int(track_id), persistent_id, unescape_field(path)))
     return ParsedRows(tuple(rows), unparsed)
 
 
@@ -116,9 +119,9 @@ def match_tracks(
     """Match lookup rows to the named MP3s by the device and inode their paths stat to.
 
     A row is kept only when its own path stats to a named MP3's key, and a vanished
-    path is simply no match. That bounds a forged row (see `parse_rows`) without
-    stopping it: its path is realistically the named file's own, so it stats to that
-    key and attaches another ``(id, persistent ID)`` pair to that MP3. Since the refresh
+    path is simply no match. The rows reach it from callers too, not only from
+    `parse_rows`, so a row naming the named file's path but another track's
+    ``(id, persistent ID)`` pair would attach that pair to the MP3. Since the refresh
     call checks each pair's persistent ID, the worst outcome is a tag reread of the
     other, real track the pair names. Each MP3 keeps its ``(id, persistent ID)`` pairs once each, in row
     order; an MP3 matching none is listed as not in Music, in the order given.

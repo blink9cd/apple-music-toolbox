@@ -26,7 +26,7 @@ for the common always-running case.
 | `AgentState` | `LOADED`, `ABSENT` or `UNKNOWN` |
 | `LaunchdError` | launchd did not settle in the wanted state, or answered unknown |
 | `Launchctl` | the seam: `run(argv, timeout)`, the `uid`, `clock` and `sleep` |
-| `service_target(uid, label)` | `gui/<uid>/<label>` |
+| `service_target(uid, label)` | `gui/<uid>/<label>`; `ValueError` for a label `build_keepalive_plist` would refuse |
 | `agent_state(ctl, label)` | one `launchctl print`, read as an `AgentState` |
 | `ServicePrint` | one `launchctl print`: its state, its stdout when loaded, and why when unknown |
 | `print_service(ctl, label)` | one `launchctl print`, kept whole |
@@ -35,7 +35,8 @@ for the common always-running case.
 | `uninstall_agent(ctl, label=, plist_path=)` | unload, confirm absent, then remove the plist |
 | `stop_agent(ctl, label=)` | unload and confirm absent, keeping the plist |
 | `kickstart_argv(uid, label)` | the command that starts the agent now; never run here |
-| `build_keepalive_plist(...)` | the plist of an agent launchd keeps running |
+| `build_keepalive_plist(...)` | the plist of an agent launchd keeps running, under a restart policy |
+| `KEEP_ALIVE_ALWAYS` · `RESTART_AFTER_FAILURE` | the two restart policies: after every exit, or only after a failed one |
 | `real_launchctl()` | the real host seam: `run_bounded`, `os.getuid()` and real time |
 
 ## The sequence, and why each wait exists
@@ -75,12 +76,19 @@ there, so the agent still reads as installed rather than as never installed.
 A timeout of `bootout` or `bootstrap` is ignored for the same reason as their exits: the wait
 after each reads the real state.
 
-Two failures escape as `OSError` rather than `LaunchdError`:
+**A launchctl that cannot be run at all** is a `LaunchdError` too. The `print` read-back turns
+it into an unknown answer, and `bootout` and `bootstrap` raise `LaunchdError` naming the label
+and the verb (`<label>: could not run launchctl <verb>: <cause>`, so a caller installing
+several agents can tell which failed), chained (`from`) to the `OSError`, since no read-back
+can follow them. So `install_agent` raises it from its `bootout`, after the new plist is
+written, and `uninstall_agent` and `stop_agent` raise it before anything is removed. Either
+way, re-running recovers once launchctl runs.
 
-- **A launchctl that cannot be run at all.** The `print` read-back turns that into an unknown
-  answer, but `bootout` and `bootstrap` do not catch it, so `install_agent` raises the
-  `OSError` from its `bootout`, after the new plist is written; `uninstall_agent` raises it
-  before anything is removed. Either way, re-running recovers once launchctl runs.
+Two failures escape as `OSError` rather than `LaunchdError`, and both concern the plist file,
+not launchd:
+
+- **A plist that cannot be written.** `install_agent` writes it before unloading anything, so
+  the old agent is left as it was.
 - **A plist that cannot be removed.** `uninstall_agent` unlinks the plist only after launchd
   confirmed the agent absent, so an unlink failure surfaces as `OSError` with the agent
   already unloaded; only the stale plist remains.
@@ -90,7 +98,19 @@ so a crashing agent is not restarted in a tight loop, `ProcessType` `Background`
 paths, and the agent's whole `PATH`, since launchd's own is minimal. launchd opens the log
 paths at spawn and does not create their folder, so the caller creates it. It refuses a label
 that `os_schedule_gen.launchd_plist_path` would refuse, by calling it, so a label cannot name
-a file outside `~/Library/LaunchAgents`.
+a file outside `~/Library/LaunchAgents`. `service_target` applies the same rule, and every
+verb builds its target through it, so a label with a `/`, which would name another service
+target, or a leading `-`, which `launchctl` would read as an option, is refused with
+`ValueError` before `launchctl` runs, and before `install_agent` writes the plist.
+
+Its `keep_alive` argument is the restart policy, `KEEP_ALIVE_ALWAYS` (`KeepAlive` `true`) by
+default: launchd restarts the agent after every exit, a clean one included, which suits a
+server that should never stop. `RESTART_AFTER_FAILURE` writes the dictionary
+`{SuccessfulExit: false}`: launchd restarts the agent only after a nonzero exit or a crash,
+and leaves it loaded but stopped after exit 0, until its next load. Under plain `true`, an
+agent that cannot recover from a failure (a folder it may not use, say) is restarted every
+throttle interval forever, each start appending to its error log, which launchd never
+rotates; under `RESTART_AFTER_FAILURE` it ends that loop by exiting 0.
 
 ## Using it
 
@@ -121,17 +141,17 @@ above the caller (the exported scrobbler tries one fixed `parents[1]` path per l
 ## How it finds its own libraries
 
 It imports the libraries `_LIBRARIES` names, and finds each by a bounded upward search from
-its own file (`_nearest_library`). Each ancestor it reads is tried as
-`<ancestor>/utilities/<name>` and then as `<ancestor>/<name>`, and the nearest folder holding
-`<name>.py` is appended to `sys.path`.
+its own file (`_nearest_library`): it looks for each library in its own folder and its
+parent, trying each as `<ancestor>/<name>`, and appends the nearest folder holding
+`<name>.py` to `sys.path`.
 
-- **Both shapes, because the module ships in two layouts.** In this tree each library is a
-  folder under `utilities/`; an export that vendors them ships each folder flattened at the
-  export root, with no `utilities/` folder above it. A search for the first shape alone
-  found nothing in an export, so the module could not be imported there.
-- **Two ancestors, and no more** (`_ANCESTORS_SEARCHED`): the module's own folder and the
-  folder holding it. In both layouts every library is a sibling of this module's folder,
-  so both are found there. Searching every ancestor would also reach the folders above an
+- **One shape covers both layouts the module ships in.** In this tree each library is a
+  folder under `utilities/`, beside this module's own folder; an export that vendors them
+  ships each folder flattened at the export root, again beside this module's folder. So the
+  parent holds every library in either layout, and a `<ancestor>/utilities/<name>` candidate
+  could never match in either.
+- **Two ancestors, and no more** (`_ANCESTORS_SEARCHED`): the module's own folder and its
+  parent. Searching every ancestor would also reach the folders above an
   export's root, where a same-named folder beside a clone would be imported in place of
   the real library.
 - **Appended, not prepended,** so the standard library and the caller's own modules stay
@@ -139,15 +159,16 @@ its own file (`_nearest_library`). Each ancestor it reads is tried as
 
 ## Tests
 
-`test_launchd_agent.py` scripts launchd with a fake whose `run` answers each expected argv from
-a queue and fails the test on any other, so each test pins the order of the calls and that
-nothing else ran. A fake clock advances only when the library sleeps. Temporary folders stand
-in for `~/Library/LaunchAgents`, so the suite never touches the real launchd.
+The suites in `tests/` (`test_launchd_reading.py`, `test_launchd_lifecycle.py`, run through the
+`test_launchd_agent.py` aggregator) script launchd with a fake whose `run` answers each expected
+argv from a queue and fails the test on any other, so each test pins the order of the calls
+and that nothing else ran. A fake clock advances only when the library sleeps. Temporary
+folders stand in for `~/Library/LaunchAgents`, so the suite never touches the real launchd.
 
 One live test installs `local.launchd-agent.selftest` running `/usr/bin/true` from a temporary
 folder, reads it loaded, uninstalls it and reads it absent. It mutates the real launchd, so it
 is skipped unless the operator opts in with `LAUNCHD_AGENT_LIVE=1`, on macOS:
 
 ```bash
-LAUNCHD_AGENT_LIVE=1 python -m unittest test_launchd_agent.LiveLaunchdTest -v
+cd tests && LAUNCHD_AGENT_LIVE=1 python -m unittest test_launchd_lifecycle.LiveLaunchdTest -v
 ```

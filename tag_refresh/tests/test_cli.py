@@ -258,6 +258,14 @@ class HelpTest(unittest.TestCase):
                 self.assertFalse(getattr(omitted, attr))
                 self.assertIs(getattr(given, attr), True)
 
+    def test_the_help_is_laid_out_by_the_shared_none_hiding_formatter(self) -> None:
+        # Pinned as a binding, not a rendering: on an interpreter past argparse's
+        # required-option fix, the stock formatter renders the same help.
+        self.assertIs(
+            amr.build_parser().formatter_class,
+            amr.help_formatter.RawNoneHidingFormatter,
+        )
+
 
 class WiringTest(unittest.TestCase):
     """The real wiring binds the real seams, and reading it makes no call."""

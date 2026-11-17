@@ -49,19 +49,32 @@ python swift_gate.py --path <dir> [--exclude <path> ...] [--min-percent N] [--sw
 Each package builds into `<scratch base>/<first 16 hex of the sha256 of its resolved path>`,
 so two packages never share build state and a run never writes into the checkout. Every
 `swift` call passes that dir as `--scratch-path`, including the manifest dump; nothing lands in
-the package's own `.build`.
+the package's own `.build`. swift_gate creates the dir itself before the first `swift` call,
+so a base it cannot write is reported as `ERROR: could not create the scratch directory:
+<Class>: <reason>` (exit 2), and a stale report it cannot delete as `could not clear the
+scratch directory`, rather than as a failed or unlaunchable `swift`. `could not run swift`
+is kept for the driver's launch itself. Any other OS error (the `--sign` temp dir or its copy
+of a product, the coverage report's read) is `ERROR: an OS error stopped the gate:
+<Class>: <reason>`, also exit 2. None of these names the absolute path.
 
 ## Discovery
 
-- No `.swift` file and no `Package.swift` under `--path`: exit 0, `nothing to gate`.
+- No `.swift` file and no `Package.swift` under `--path`: exit 0,
+  `~/<dir>: no Swift found; nothing to gate (skipped).`
 - `.swift` files, or an `.xcodeproj` / `.xcworkspace`, that no `Package.swift` owns: exit 2,
-  "swift_gate gates SwiftPM packages only". This holds even when a package sits beside
-  them, because a loose file no package builds would otherwise pass unseen.
+  "swift_gate gates SwiftPM packages only: no Package.swift owns `<files>` under
+  `~/<dir>`". This holds even when a package sits beside them, because a loose file no
+  package builds would otherwise pass unseen.
+- These two lines, and each package's `== <package>` report header, show a path under the
+  running user's home from `~/` and any other path as given. The `--json` report keeps
+  each package's resolved path, for a reader that opens it.
 - Otherwise each directory holding a `Package.swift` is one package, gated in turn; the exit
   code is the worst package's.
 
 The walk prunes `.build`, `.swiftpm`, `DerivedData`, the usual VCS and cache dirs, any
-virtualenv, and every exclude. A dependency checkout under `.build` is therefore never a
+virtualenv, every exclude, and any other checkout below `--path` (a directory holding a
+`.git` file or folder, such as a session worktree), though never `--path` itself. A
+dependency checkout under `.build` is therefore never a
 subject. A folder of illustrative `.swift` samples is kept out the same way, by listing it in
 `[tool.swift_gate] exclude`.
 
@@ -211,22 +224,65 @@ identity = "Apple Development: Example (ABCDE12345)"
   layout varies by toolchain. Each product is copied to a temp dir, and the copy gets
   `codesign --force --sign <identity> --timestamp=none`, then
   `codesign --verify --strict --verbose=2`. Either nonzero is exit 1 with codesign's
-  redacted output; `codesign` that cannot run is exit 2.
+  redacted output; `codesign` that cannot run is exit 2, named by the error's class and
+  the OS's reason only (`FileNotFoundError: No such file or directory`), since the
+  exception's own text carries codesign's path.
 - **Shown, never in full.**
-  - The identity prints as its first word plus `…` (`Apple…`). A one-word identity (a
-    SHA-1 hash, a bare team ID, the ad-hoc `-`) has no safe prefix and prints as
-    `<identity>…`.
+  - The identity prints as its first word plus `…` (`Apple…`), the word cut at a colon
+    inside it (`Foo:Bob (<ID>)` prints `Foo…`). A one-word identity (a SHA-1 hash, a bare
+    team ID, the ad-hoc `-`) has no safe prefix and prints as `<identity>…`.
   - codesign's output is redacted whatever the identity, because an ambiguous identity makes
-    codesign echo the full common name of every certificate it matched. Each
-    `<Type>: <Name> (<ID>)` common name keeps only its type (`Apple Development: …`), the
-    name running to the nearest team ID even when it holds a colon, a parenthesis or a
-    quote, and
-    each parenthesized ten-character team ID becomes `(…)`. The configured identity and
-    its own team ID are scrubbed too, except where the rendering would not shorten the
-    identity, so the ad-hoc `-` leaves codesign's own `--flags` intact.
+    codesign echo the full common name of every certificate it matched, and every
+    `findIdentity` message opens with the identity exactly as configured (as Mac Roman
+    mojibake of its UTF-8 bytes when it is not ASCII). So the identity, in both spellings,
+    is masked first, before any pass could break it up and leave its name behind, and
+    shows as its rendering wherever the passes leave it whole. Every identity is masked
+    but the ad-hoc `-`, a bare known certificate type, which holds no name, and a
+    known-type common name with one team ID, which the passes below already handle. An
+    identity its rendering shortens is masked everywhere it appears. One that it does
+    not (a one-word identity of a few characters, such as a self-made `Bob`) is masked
+    only where codesign echoes it, before a colon and a space at a line's start or after
+    a blank, or as a whole quoted string, and shows there as `<identity>…`; the same
+    letters inside a longer word or a path are left alone. Then, line by line:
+    - A `<Type>: <Name> (<ID>)` common name whose type is a known certificate type keeps
+      only that type (`Apple Development: …`), the name running to the nearest team ID even
+      when it holds a colon, a parenthesis or a quote. The label is kept only where a
+      common name is known to start: at the line's start, after one-token diagnostic
+      prefixes (`codesign: Apple Development: …`), or quoted as an item of codesign's own
+      `(matches "…" and "…"` list. Anywhere else a known type may sit inside a longer name
+      (`Custom: Bob Mac Developer: …`), and keeping its label would print the name to its
+      left. The known types are a deliberately closed list, held once as
+      `CERTIFICATE_TYPES` in `src/swgate_redact.py` and pinned by a test, so it is not
+      restated here.
+    - On any line still holding a raw team ID, with or without a space before it, the
+      text from the line's first colon back to the last quote before it (past any blanks),
+      through the line's last team ID, becomes `…: …`, kept labels included. The colon may
+      be followed by anything (a space, a tab, the name itself), and the type before it
+      may hold any character, so a type of any spelling goes with its name.
+    - Every quoted item of codesign's `(matches "…"` list, in either of its formats, that
+      is not a kept label becomes `"…"`, team ID or not. An item runs to the last quote
+      before the next item (an `and` and a quote) or the line's end, never to the next
+      quote or to the first `" in` or `")` after it, since a common name may hold any of
+      them. When that quote is followed by anything but codesign's own `in <keychain>`
+      or `)`, the
+      item runs on to the next item or the line's end. The only cost is over-redaction:
+      a keychain path holding a quote is taken with the item. So does the common name
+      before `: this identity cannot be used for signing code`, which codesign prints
+      unquoted.
+    - Each remaining parenthesized ten-character team ID becomes `(…)`, and the
+      identity's own team ID goes wherever it survives.
+
+    Every pass runs in linear time, and each widening can only over-redact, never leak a
+    name: an ambiguity list mixing a known type with an unknown one prints only `…: …")`.
+    A test runs a frozen copy of the earlier redaction beside this one over generated
+    lines and fails on any name the earlier one removed and this one keeps. A common
+    name wrapped onto a second line is not handled: only a self-made certificate's can
+    be, since codesign never wraps on a pipe. The ad-hoc `-` is never masked, so it
+    leaves codesign's own `--flags` intact.
   - Every path under the running user's home, in swift_gate's own messages and in
     codesign's, prints from `~/`, so a log pasted into an issue carries neither a team ID
-    nor the home directory's layout.
+    nor the home directory's layout. The home is matched as given and resolved, so a
+    resolved path under a symlinked home prints from `~/` too.
 
 ## Exit codes
 
@@ -234,7 +290,7 @@ identity = "Apple Development: Example (ABCDE12345)"
 | --- | --- |
 | `0` | Every package clean, or nothing to gate. |
 | `1` | A finding, a failed dump, build or test run, no coverage report, a timeout (naming the stage), coverage below `--min-percent`, or with `--sign` a failed `codesign` sign or verify. |
-| `2` | Could not run: not macOS, no toolchain, Swift outside any SwiftPM package, no or a malformed `macos_floor`, unreadable config, an untrusted dump or export, or with `--sign` a malformed signing setting, one inside a checkout, or no `codesign`. |
+| `2` | Could not run: not macOS, no toolchain, Swift outside any SwiftPM package, no or a malformed `macos_floor`, unreadable config, an untrusted dump or export, a scratch dir that cannot be created or cleared, any other OS error, or with `--sign` a malformed signing setting, one inside a checkout, or no `codesign`. |
 
 ## Example
 

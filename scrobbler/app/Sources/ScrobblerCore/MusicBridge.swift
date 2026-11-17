@@ -7,6 +7,13 @@ public protocol MusicBridge: AnyObject {
   /// both called on the main actor.
   @MainActor func start(
     onNotice: @escaping @MainActor (PlayerNotice) -> Void, onQuit: @escaping @MainActor () -> Void)
+  /// Ask the system whether this app may script Music, and call `done` on the main actor
+  /// with the answer. The system prompts the user when they have not yet answered, and the
+  /// request waits as long as they take: it has no time limit, so the prompt stays up until
+  /// clicked. It never launches Music, and answers `.musicNotRunning` when Music is not
+  /// running.
+  @MainActor func requestPermission(
+    _ done: @escaping @MainActor @Sendable (AutomationPermission) -> Void)
   /// Whether Music is running; asking never launches it.
   @MainActor func isMusicRunning() -> Bool
   /// The position script's result, parsed.

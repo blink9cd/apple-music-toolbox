@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "bundle_id": "local.apple-music-toolbox.runner",
+  "launchd_label": "local.apple-music-toolbox.runner",
+  "grant_label": "local.apple-music-toolbox.runner.grant",
+  "display_name": "Apple Music Toolbox Runner",
+  "app_name": "Apple Music Toolbox Runner.app",
+  "executable": "runner",
+  "data_dir": "Library/Application Support/apple_music_toolbox/runner",
+  "signing_config": ".config/swift_gate/signing.toml"
+}

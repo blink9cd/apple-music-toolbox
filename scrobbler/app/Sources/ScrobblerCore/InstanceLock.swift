@@ -13,14 +13,21 @@ public final class InstanceLock: Sendable {
     self.descriptor = descriptor
   }
 
-  /// Take the lock at `url`, making its folder if needed. Never waits: a lock another
-  /// process has taken is `.held`, and a lock file that cannot be opened, a symlink where
-  /// it belongs included, is `.unopenable`.
-  public static func acquire(at url: URL) -> LockAttempt {
-    // A folder that cannot be made fails the open just below, which is the one answer.
-    try? FileIO.makeFolder(url.deletingLastPathComponent())
+  /// Take the lock at `url`, inside the data folder `dataDir`, making its folder if
+  /// needed. Never waits: a lock another process has taken is `.held`, and a lock file
+  /// that cannot be opened, a symlink where it, its folder, or the data folder belongs
+  /// included, is `.unopenable`.
+  public static func acquire(at url: URL, owning dataDir: URL) -> LockAttempt {
+    // Every level from the data folder down is made and opened without following a link
+    // (`FileIO.openMadeFolder`), and the lock file opened inside the last of them, so
+    // nothing is reached through a link.
+    let lockFolder = url.deletingLastPathComponent()
+    guard let folder = try? FileIO.openMadeFolder(lockFolder, owning: dataDir) else {
+      return .unopenable
+    }
+    defer { close(folder) }
     let flags = O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC
-    let descriptor = open(url.path, flags, FileIO.privateFileMode)
+    let descriptor = openat(folder, url.lastPathComponent, flags, FileIO.privateFileMode)
     guard descriptor >= 0 else { return .unopenable }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
       close(descriptor)

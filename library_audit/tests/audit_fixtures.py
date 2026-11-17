@@ -36,13 +36,14 @@ import audit_sync  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_tags  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_walk  # noqa: E402 - import follows the sys.path bootstrap above
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
+import music_calls_list  # noqa: E402 - import follows the sys.path bootstrap above
 
 #: The kind of each script, the key a canned answer is filed under.
 IS_RUNNING, COUNT, LIST = "is_running", "count", "list"
 _KINDS = {
     music_calls.IS_RUNNING_SCRIPT: IS_RUNNING,
     music_calls.COUNT_TRACKS_SCRIPT: COUNT,
-    music_calls.LIST_TRACKS_SCRIPT: LIST,
+    music_calls_list.LIST_TRACKS_SCRIPT: LIST,
 }
 #: Where a script's own arguments start in an argv: ``osascript -e <script> --``.
 _ARGS_START = 4
@@ -78,6 +79,15 @@ def pid(number: int) -> str:
     return f"{number:016X}"
 
 
+#: What the listing script writes for each character it escapes in a name or path.
+_ESCAPED = {char: f"%{ord(char):02X}" for char in "%\x1f\t\n\r"}
+
+
+def escaped(text: str) -> str:
+    """*text* with each character the listing script escapes replaced by its escape."""
+    return "".join(_ESCAPED.get(char, char) for char in text)
+
+
 @dataclass(frozen=True)
 class Track:
     """One invented track, as the listing reports it.
@@ -99,15 +109,15 @@ class Track:
     size: str = "0"
 
     def row(self) -> str:
-        """The listing row Music would print for this track."""
+        """The listing row Music would print for this track, its path and names escaped."""
         fields = (
             pid(self.number),
             self.status,
             str(self.disc),
             str(self.track),
-            self.path,
-            self.album,
-            self.artist,
+            escaped(self.path),
+            escaped(self.album),
+            escaped(self.artist),
             "true" if self.compilation else "false",
             self.kind,
             "true" if self.enabled else "false",

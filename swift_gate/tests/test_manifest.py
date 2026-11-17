@@ -13,7 +13,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from _fixtures import dump_package, write  # noqa: E402 - fixtures bootstrap sys.path
@@ -21,6 +21,19 @@ from _fixtures import dump_package, write  # noqa: E402 - fixtures bootstrap sys
 import swgate_config  # noqa: E402 - on sys.path via _fixtures
 import swgate_manifest  # noqa: E402 - same
 from swgate_model import ConfigError, ParseError  # noqa: E402 - same
+
+
+# The deterministic profile fuzz_gate's convention registers (fuzz_gate.md, "Determinism"):
+# derandomized so the in-suite run is reproducible, with no per-example deadline and no
+# too_slow check, so machine load cannot fail a property that holds. Loaded at import,
+# before any @given below is decorated, because a property snapshots its settings then.
+settings.register_profile(
+    "deterministic",
+    derandomize=True,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.load_profile("deterministic")
 
 FLOOR = "14"
 SHOWN = "Package.swift"

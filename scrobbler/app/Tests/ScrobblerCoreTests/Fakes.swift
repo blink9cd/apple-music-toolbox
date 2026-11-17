@@ -15,6 +15,12 @@ final class FakeMusicBridge: MusicBridge {
   var position: Result<PositionRead, SnapshotReadError> = .failure(.musicNotRunning)
   /// What the next snapshot read returns.
   var snapshot: Result<TrackSnapshot, SnapshotReadError> = .failure(.noCurrentTrack)
+  /// The answer each permission request gets at once; nil holds the request, as the user
+  /// does by not yet answering the prompt, until `answerPermission` gives one.
+  var permission: AutomationPermission? = .granted
+  /// The permission requests being held, oldest first, each made while `permission` was
+  /// nil. More than one waits when the coordinator gave up on a request and asked anew.
+  private var heldPermissions: [@MainActor @Sendable (AutomationPermission) -> Void] = []
   /// Each call, by name, in order.
   private(set) var calls: [String] = []
   /// The notice handler `start` was given.
@@ -33,6 +39,22 @@ final class FakeMusicBridge: MusicBridge {
   func isMusicRunning() -> Bool {
     calls.append("running")
     return running
+  }
+
+  func requestPermission(_ done: @escaping @MainActor @Sendable (AutomationPermission) -> Void) {
+    calls.append("permission")
+    if let permission { done(permission) } else { heldPermissions.append(done) }
+  }
+
+  /// Answer the oldest held permission request with `answer`, as the user clicking the
+  /// prompt, or as a request the system kept for long finally returning. Answering with none held
+  /// is the test's failure, recorded rather than trapped so the rest of the run reports.
+  func answerPermission(_ answer: AutomationPermission) {
+    guard !heldPermissions.isEmpty else {
+      Issue.record("no permission request is held to answer")
+      return
+    }
+    heldPermissions.removeFirst()(answer)
   }
 
   func readPosition() -> Result<PositionRead, SnapshotReadError> {

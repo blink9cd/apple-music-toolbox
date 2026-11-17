@@ -33,7 +33,7 @@ public struct PlayerNotice: Sendable, Equatable {
     }
     return PlayerNotice(
       state: state,
-      persistentID: PersistentID.normalize(userInfo[AnyHashable("Persistent ID")]),
+      persistentID: PersistentID.normalize(userInfo[AnyHashable("PersistentID")]),
       name: FieldText.capped(userInfo[AnyHashable("Name")] as? String),
       artist: FieldText.capped(userInfo[AnyHashable("Artist")] as? String),
       album: FieldText.capped(userInfo[AnyHashable("Album")] as? String),

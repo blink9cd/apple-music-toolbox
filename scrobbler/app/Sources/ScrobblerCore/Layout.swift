@@ -14,9 +14,9 @@ public enum Layout {
   /// The launch agent's label, the `launchd_label` key.
   public static let launchdLabel = "local.listensmith.scrobbler"
   /// The name the app shows, the `display_name` key.
-  public static let displayName = "listensmith scrobbler"
+  public static let displayName = "Listensmith Scrobbler"
   /// The app bundle's folder name, the `app_name` key.
-  public static let appName = "listensmith scrobbler.app"
+  public static let appName = "Listensmith Scrobbler.app"
   /// The executable's file name, the `executable` key.
   public static let executable = "scrobbler"
   /// The data folder, relative to the home folder, the `data_dir` key.
@@ -91,9 +91,15 @@ public struct ScrobblerPaths: Equatable, Sendable {
 
   /// Make the data folder and every folder the app writes in, each new one private to this
   /// user, leaving any that already exist and their contents in place.
-  public func makeDataFolders() throws {
+  ///
+  /// The data folder and each folder in it are opened without following a link, the
+  /// folders in it inside the data folder's own descriptor, so a link at any of them is
+  /// refused and nothing is made through one (`FileIO.openMadeFolder`).
+  public func makeDataFolders() throws(FileIOError) {
+    let data = try FileIO.openMadeFolder(dataDir, owning: dataDir)
+    defer { close(data) }
     for folder in [queueDir, refusedDir, stateDir, logsDir] {
-      try FileIO.makeFolder(folder)
+      close(try FileIO.openLevel(folder.lastPathComponent, in: data))
     }
   }
 }

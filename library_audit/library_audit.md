@@ -93,8 +93,8 @@ listed as gone rather than counted as cloud-only, which is the safe direction.
 
 **What an album is:** an album group is the album artist (the artist when that
 is empty), the album and the disc. A file's come from its tags; a Music.app track's from the
-listing's same three fields. Both sides are compared the same way: tab, linefeed, and
-carriage return turned into spaces (as the listing script does), Unicode composed (NFC),
+listing's same three fields, read back exactly. Both sides are compared the same way:
+tab, linefeed, and carriage return turned into spaces, Unicode composed (NFC),
 surrounding spaces stripped, and case folded, so `Invented Album` and `INVENTED ALBUM` (with a trailing space) are
 one album; Music.app's disc `0` (none) is disc 1, as a file's absent disc tag is, and a disc
 past four digits is disc 1 on both sides, as the tag read takes it (check 3). An album
@@ -366,7 +366,9 @@ character escaped):
 belongs in a repository: `--report` refuses any path inside a git working tree, judged by a
 `.git` entry in the target's folder or any folder above it, symbolic links resolved. The file
 is written to a temporary file beside it and renamed over it, so a reader never sees half a
-report, and it is created readable by the user who ran the tool only.
+report, and it is created readable by the user who ran the tool only. The options' values,
+their refusals and the write are `../tag_refresh/src/report_file.py`, which `phone_audit`
+delivers its report through too, so the two tools refuse and write a report alike.
 
 ### The HTML report
 
@@ -397,7 +399,7 @@ at one fixed place on `sys.path`; `phone_audit`'s page is laid out in it too.
 
 ## The listing call, and why a failed call ends the run
 
-The tracks come from `music_calls.list_tracks`, and their count from
+The tracks come from `music_calls_list.list_tracks`, and their count from
 `music_calls.count_tracks`, in `../tag_refresh/src/`: this tool shares tag_refresh's
 Music.app calls rather than keeping its own, so both use the same two bounds (30 s per Apple
 event inside the script, 35 s on the whole call) and the same failure types;
@@ -428,10 +430,14 @@ therefore writes each size as millions and the rest, each an exact integer, the 
 to six digits, so every size is plain decimal digits; the parser takes up to fifteen digits
 as exact and reads anything else as an unknown size, counted, never a mismatch. The
 rows are built after the script's `tell` block, so no step of building them is sent to
-Music.app, and joined once rather than appended one by one. Album and artist names have each
-tab, linefeed, and carriage return turned into a space inside the script, so no name can
-split a row; a row whose path holds one is counted as an unparsed row, a finding, since that
-track could not be placed.
+Music.app, and joined once rather than appended one by one. In the path, the album and the
+artist, the script writes each percent sign, U+001F, tab, linefeed and carriage return as a
+percent sign and that character's two hex digits (the escape
+`../tag_refresh/src/script_text.py` holds, shared with play_count_baseline and the album lookup), and the
+parser undoes it once the row's shape is checked, so no path or name can split or forge a
+row, and each reads back exactly: a track whose path holds a line break is placed like any
+other. Before it, the names were flattened in the script, and a path holding a line break
+split its row, so its batch answered the wrong number of rows and the audit ended.
 
 **A failed, timed-out, or refused call ends the run with exit `2` and no report.** A partial
 listing would report every unlisted track's file as having no track, which is worse than no

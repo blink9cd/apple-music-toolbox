@@ -13,7 +13,8 @@ Everything here is here because more than one layer speaks it:
   "nothing to gate" apart from a pass and from "could not run";
 * the literals two layers must agree on: the coverage marker the scan and the report both
   name, and the prerequisite group every exit-2 message points at;
-* the injected process seam's type.
+* the injected process seam's type, and :func:`os_reason`, the one way the CLI and the
+  sign stage name an OS error that stopped a tool from running.
 
 Entry point assumptions
 -----------------------
@@ -128,6 +129,8 @@ class GateOptions:
     min_percent: float = 100.0
     timeout: float = 1200.0
     signing: SigningSetting | None = None
+    # Where a message shows a path from ``~``; None reads the running user's at run time.
+    home: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -139,3 +142,8 @@ class GateResult:
     findings: tuple[Finding, ...] = ()
     percent: float | None = None
     misses: tuple[str, ...] = ()
+
+
+def os_reason(exc: OSError) -> str:
+    """*exc* as its class and the OS's reason only: its own text names an absolute path."""
+    return f"{type(exc).__name__}: {exc.strerror or 'no reason given'}"

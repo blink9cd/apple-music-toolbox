@@ -258,7 +258,7 @@ class WriteTest(CliCase):
         def scribble(target: Path, _data: bytes) -> None:
             target.write_bytes(b"{not json")
 
-        with mock.patch.object(report_file, "write_atomically", side_effect=scribble):
+        with mock.patch.object(report_file, "write_new", side_effect=scribble):
             result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
         self.assertEqual(result.code, _REFUSED)
         self.assertIn("unconfirmed", result.stderr)
@@ -267,13 +267,13 @@ class WriteTest(CliCase):
         def scribble(target: Path, _data: bytes) -> None:
             target.write_bytes(b"{}\n")
 
-        with mock.patch.object(report_file, "write_atomically", side_effect=scribble):
+        with mock.patch.object(report_file, "write_new", side_effect=scribble):
             result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
         self.assertEqual(result.code, _REFUSED)
         self.assertIn("unconfirmed", result.stderr)
 
     def test_a_file_that_cannot_be_read_back_is_unconfirmed(self) -> None:
-        real_write = report_file.write_atomically
+        real_write = report_file.write_new
 
         def write_then_break_reads(target: Path, data: bytes) -> None:
             real_write(target, data)
@@ -284,7 +284,7 @@ class WriteTest(CliCase):
         )
         self.addCleanup(mock.patch.stopall)
         with mock.patch.object(
-            report_file, "write_atomically", side_effect=write_then_break_reads
+            report_file, "write_new", side_effect=write_then_break_reads
         ):
             result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
         mock.patch.stopall()
@@ -294,7 +294,7 @@ class WriteTest(CliCase):
 
     def test_a_failed_write_cannot_run(self) -> None:
         with mock.patch.object(
-            report_file, "write_atomically", side_effect=OSError(28, "No space left")
+            report_file, "write_new", side_effect=OSError(28, "No space left")
         ):
             result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
         self.assertEqual(result.code, _CANNOT)
@@ -318,6 +318,30 @@ class WriteTest(CliCase):
         self.assertEqual(result.code, _CANNOT)
         self.assertIn("exists already", result.stderr)
         self.assertEqual(self.target.read_bytes(), b"arrived\n")
+
+    def test_a_file_made_between_the_last_check_and_the_write_is_not_replaced(
+        self,
+    ) -> None:
+        # The target is checked again just before the write; a file another
+        # process makes after that check is refused by the write itself.
+        real_write = report_file.write_new
+
+        def plant_then_write(target: Path, data: bytes) -> None:
+            target.write_bytes(b"planted\n")
+            real_write(target, data)
+
+        with mock.patch.object(report_file, "write_new", side_effect=plant_then_write):
+            result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
+        self.assertEqual(result.code, _CANNOT)
+        self.assertEqual(
+            result.stderr.splitlines()[-1],
+            f"{pcb.build_parser().prog}: --output {self.target} exists already; "
+            "a snapshot is never replaced",
+        )
+        self.assertEqual(self.target.read_bytes(), b"planted\n")
+        self.assertEqual(
+            sorted(p.name for p in self.root.iterdir()), [self.target.name]
+        )
 
     def test_an_interrupt_writes_nothing(self) -> None:
         music = bf.FakeMusic(
@@ -349,6 +373,42 @@ class WriteTest(CliCase):
         )
         self.assertNotIn("nothing written", result.stderr)
         self.assertTrue(self.target.exists())
+
+    def test_an_interrupt_once_the_file_is_linked_says_written_not_confirmed(
+        self,
+    ) -> None:
+        # Ctrl-C landing as the link returns: the file is whole, so "nothing written"
+        # would be false.
+        real_link = os.link
+
+        def link_then_interrupt(source: str, destination: Path) -> None:
+            real_link(source, destination)
+            raise KeyboardInterrupt
+
+        with mock.patch.object(report_file.os, "link", side_effect=link_then_interrupt):
+            result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
+        self.assertEqual(result.code, pcb.EXIT_INTERRUPTED)
+        self.assertIn(
+            "interrupted; --output was written but not confirmed", result.stderr
+        )
+        self.assertNotIn("nothing written", result.stderr)
+        self.assertTrue(self.target.exists())
+
+    def test_a_staging_file_that_stays_is_named_and_the_run_succeeds(self) -> None:
+        with mock.patch.object(
+            report_file.os,
+            "unlink",
+            side_effect=PermissionError(1, "Operation not permitted"),
+        ):
+            result = self.run_main(bf.FakeMusic(tracks=[bf.INVENTED_TRACK]))
+        self.assertEqual(result.code, _WRITTEN)
+        leftovers = [p for p in self.root.iterdir() if p != self.target]
+        self.assertEqual(len(leftovers), 1)
+        self.assertIn(
+            f"{pcb.build_parser().prog}: --output was written; "
+            f"remove its staging file {leftovers[0]}",
+            result.stderr,
+        )
 
 
 class SummaryTest(CliCase):

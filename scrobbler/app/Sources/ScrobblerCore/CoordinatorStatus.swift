@@ -12,6 +12,7 @@ extension Coordinator {
     status.lastSentAt = drainer.lastSentAt
     status.unrecordableCount = unrecordableCount
     status.automationDenied = automationDenied
+    status.automationAskedAt = automationAskedAt
     status.nowPlaying = nowPlaying
     var queueError: String?
     do {
@@ -28,10 +29,15 @@ extension Coordinator {
     return status
   }
 
-  /// Replace `status.json` with this moment's snapshot.
+  /// Replace `status.json` with this moment's snapshot, and note whether a request's
+  /// pending time went with it. A write can fail after its rename, with the new file
+  /// already in place, so a pending time counts as on disk from the attempt on, and as
+  /// gone only once a write without one succeeds.
   func writeStatus() {
+    pendingTimeOnDisk = pendingTimeOnDisk || automationAskedAt != nil
     do {
       try state.writeStatus(statusSnapshot())
+      pendingTimeOnDisk = automationAskedAt != nil
     } catch {
       log.error("status not written: \(String(describing: error))")
     }

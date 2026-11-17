@@ -4,8 +4,8 @@ import Testing
 @testable import ScrobblerCore
 
 /// A fixed-seed generator, so every run feeds the parsers the same inputs and a failure
-/// reproduces exactly.
-private struct SplitMix64: RandomNumberGenerator {
+/// reproduces exactly. The escape tests draw from it too.
+struct SplitMix64: RandomNumberGenerator {
   var state: UInt64
 
   mutating func next() -> UInt64 {
@@ -62,7 +62,7 @@ private func randomValue(using rng: inout SplitMix64) -> Any {
 }
 
 private let noticeKeys = [
-  "Player State", "Persistent ID", "Name", "Artist", "Album", "Total Time", "Location",
+  "Player State", "PersistentID", "Name", "Artist", "Album", "Total Time", "Location",
 ]
 
 @Test func snapshotParserNeverTrapsOnRandomText() {

@@ -14,8 +14,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 _TOOL = Path(__file__).resolve().parent.parent
-sys.path[:0] = [str(_TOOL / "src"), str(_TOOL.parent / "tag_refresh" / "src")]
+sys.path[:0] = [
+    str(_TOOL / "tests"),
+    str(_TOOL / "src"),
+    str(_TOOL.parent / "tag_refresh" / "src"),
+]
 
+import _library_audit_fuzz_profile  # noqa: E402, F401 - loads the deterministic profile before any @given
 import audit_spelling as sp  # noqa: E402 - import follows the sys.path bootstrap above
 
 #: Every hyphen and dash lookalike the fold must read as an ASCII hyphen.

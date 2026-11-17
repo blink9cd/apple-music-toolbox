@@ -17,6 +17,7 @@ from hypothesis import strategies as st
 _HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(_HERE), str(_HERE.parent / "src")]
 
+import _phone_audit_fuzz_profile  # noqa: E402, F401 - loads the deterministic profile before any @given
 import phone_fixtures as pf  # noqa: E402 - import follows the sys.path bootstrap above
 import phone_listing as pl  # noqa: E402 - import follows the sys.path bootstrap above
 

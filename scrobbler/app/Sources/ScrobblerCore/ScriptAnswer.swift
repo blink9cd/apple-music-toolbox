@@ -19,22 +19,14 @@ public enum ScriptAnswer: Sendable, Equatable {
 }
 
 extension SnapshotReadError {
-  /// The system refused to let this app send Apple events to Music.
-  static let errorAutomationDenied = -1743
-  /// Music could not get an object: the current track went away during the read.
-  static let errorNoSuchObject = -1728
-  /// The app is not running: Music quit before the read reached it.
-  static let errorAppNotRunning = -600
-  /// The connection to the app went away: Music quit while the read was under way.
-  static let errorConnectionInvalid = -609
-
   /// The read error an AppleScript error numbered `number` stands for; a number that is
   /// missing or not one of these is a malformed read, named by its number.
   public static func fromAppleScriptError(number: Int?) -> SnapshotReadError {
     switch number {
-    case errorAutomationDenied: .automationDenied
-    case errorNoSuchObject: .noCurrentTrack
-    case errorAppNotRunning, errorConnectionInvalid: .musicNotRunning
+    case AppleEventError.notPermitted, AppleEventError.wouldRequireConsent: .automationDenied
+    case AppleEventError.timedOut: .timedOut
+    case AppleEventError.noSuchObject: .noCurrentTrack
+    case AppleEventError.appNotRunning, AppleEventError.connectionInvalid: .musicNotRunning
     case let number?: .malformed("AppleScript error \(number)")
     case nil: .malformed("AppleScript error without a number")
     }

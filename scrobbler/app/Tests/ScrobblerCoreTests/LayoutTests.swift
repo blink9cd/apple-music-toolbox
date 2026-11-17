@@ -47,7 +47,7 @@ import Testing
   #expect(paths.logsDir.path == "\(data)/logs")
   #expect(paths.outLog.path == "\(data)/logs/out.log")
   #expect(paths.errLog.path == "\(data)/logs/err.log")
-  #expect(paths.appBundle.path == "\(data)/listensmith scrobbler.app")
+  #expect(paths.appBundle.path == "\(data)/Listensmith Scrobbler.app")
   #expect(paths.configFile.path == "/home-for-test/.config/listensmith/scrobbler.json")
   #expect(paths.signingConfig.path == "/home-for-test/.config/swift_gate/signing.toml")
   #expect(paths.launchAgentsDir.path == "/home-for-test/Library/LaunchAgents")

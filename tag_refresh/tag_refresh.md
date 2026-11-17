@@ -73,7 +73,10 @@ is named: they are united by device and inode. The MP3s are grouped by their fol
 each album folder the tool makes two calls:
 
 1. **Look up.** Every file track whose album is one of the folder's names (below), each
-   answered as its `id`, persistent ID, and file path.
+   answered as its `id`, persistent ID, and file path. The script escapes each percent
+   sign, U+001F, tab and line break in the path as a percent sign and two hex digits,
+   and the parser reads it back, so a path holding one can neither split its row nor
+   forge another.
 2. **Refresh by id.** Each matched track by direct `track id N`, refreshed only when its
    persistent ID is still the one the lookup answered; a track whose ID changed, or that is
    gone, is counted `stale` and never refreshed blind.
@@ -235,7 +238,15 @@ split a row or drive the terminal.
 library, the network, or anything outside a temporary directory: every call goes through a
 fake runner that plays `osascript` from an invented library and records each argument list,
 so a suite asserts that the `is running` probe came first, that no name appears in any script
-body, and that a dry run made no refresh call.
+body, and that a dry run made no refresh call. `src/` also holds what the two audits share
+and tag_refresh itself does not use: `report_file`'s report delivery (the format
+values, the report's refusals and its write), the HTML table cells in `report_html`, and
+library_audit's track listing in `music_calls_list`, each pinned by its own suite here.
+`script_text` holds the text escape every listing script opens with and the one decoder
+for it, shared with library_audit and play_count_baseline; the scrobbler's Swift copy and
+recently_added's copy are held equal to it. `tests/test_script_text_osascript.py` runs each
+shipped copy of the escape through the real `/usr/bin/osascript`, by absolute path, cut out
+of its script with no `tell` block, so it reaches no application; it skips off macOS.
 
 **The live read-only test**, `tests/test_live_lookup.py`, is the one exception, and it skips
 unless you ask for it. It makes exactly one lookup against the real Music.app, for an album

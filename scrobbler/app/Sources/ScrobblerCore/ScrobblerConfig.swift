@@ -3,7 +3,8 @@ import Foundation
 /// Why the config file was refused. Each case names a key, or the whole file, and never
 /// quotes the file's content.
 public enum ConfigError: Error, Equatable, Sendable {
-  /// The file exists but could not be read: not a regular file, unopenable, or too large.
+  /// The file exists but could not be read: a symlink or anything else not a regular file,
+  /// unopenable, or too large.
   case unreadable
   /// The file is not one JSON object.
   case notAnObject
@@ -85,8 +86,10 @@ public struct ScrobblerConfig: Equatable, Sendable {
 
   /// The settings in the file at `url`: the defaults when no file is there.
   public static func load(from url: URL) throws(ConfigError) -> ScrobblerConfig {
-    // Non-blocking, so a FIFO planted at the path cannot hang the app at start.
-    let descriptor = open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+    // Non-blocking, so a FIFO planted at the path cannot hang the app at start, and never
+    // through a symlink: one at the path fails with ELOOP, which is unreadable, so even a
+    // link to nothing is refused rather than read as an absent file.
+    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
     guard descriptor >= 0 else {
       if errno == ENOENT { return ScrobblerConfig() }
       throw .unreadable

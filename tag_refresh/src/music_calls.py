@@ -16,9 +16,9 @@ Music.app; `real_run` is the real seam, built on `bounded_run`.
 5. `refresh_ids` refreshes tracks by direct `track id N` reference, each only after
    its persistent ID is confirmed, and returns how many were refreshed and stale.
 6. `count_tracks` counts every track of the library, of any class, and
-   `list_tracks` reads a 1-based inclusive range of them, one raw tab-separated row a
-   track, for library_audit to parse (`audit_rows`). Both only read: library_audit
-   never writes to Music.app.
+   `music_calls_list.list_tracks`, in the sibling module, reads a 1-based inclusive
+   range of them, one raw tab-separated row a track, for library_audit to parse
+   (`audit_rows`). Both only read: library_audit never writes to Music.app.
 
 Every value a script needs travels as an `argv` item after `--`, never spliced into
 the script text, so a name holding a quote or a backslash needs no escaping and a
@@ -52,6 +52,7 @@ from typing import NamedTuple
 sys.path += [str(Path(__file__).resolve().parents[2] / "bounded_run")]
 
 import bounded_run
+import script_text
 
 # (argv, timeout_seconds) -> completed process: the shape of recently_added's
 # `Runner`. Injected so every branch is reachable with no real `osascript`.
@@ -105,7 +106,7 @@ COUNT_SCRIPT = f"""tell application "Music"
 end tell"""
 
 # The count `list_tracks` indexes into: every track of the library playlist, of any
-# class, since its ranges are plain `tracks i thru j` (see LIST_TRACKS_SCRIPT).
+# class, since its ranges are plain `tracks i thru j` (`music_calls_list`).
 COUNT_TRACKS_SCRIPT = f"""tell application "Music"
     with timeout of {IN_SCRIPT_TIMEOUT_SECONDS} seconds
         return count of tracks of library playlist 1
@@ -137,8 +138,14 @@ end run"""
 # the first way, 12 well-formed ones this way). The one expected absence, a track
 # with no file, reads as `missing value` and is skipped by the `if`. There is no
 # `try`: every other error ends the call non-zero, Music's -1712 included, so a
-# failure can never read as "these tracks are not in Music".
-LOOKUP_SCRIPT = f"""on run argv
+# failure can never read as "these tracks are not in Music". The path goes through
+# `escapedText`, the shared handler the script opens with (`script_text`), so a path
+# holding a tab or a line break can neither split its row nor forge another, and
+# `refresh_match.parse_rows` reads it back exactly.
+LOOKUP_SCRIPT = (
+    script_text.ESCAPE_HANDLER
+    + f"""
+on run argv
     set output to ""
     tell application "Music"
         with timeout of {IN_SCRIPT_TIMEOUT_SECONDS} seconds
@@ -147,13 +154,14 @@ LOOKUP_SCRIPT = f"""on run argv
                 set albumTracks to (every file track of library playlist 1 whose album is albumText)
                 repeat with albumTrack in albumTracks
                     set trackFile to location of albumTrack
-                    if trackFile is not missing value then set output to output & ((id of albumTrack) as string) & tab & (persistent ID of albumTrack) & tab & (POSIX path of trackFile) & linefeed
+                    if trackFile is not missing value then set output to output & ((id of albumTrack) as string) & tab & (persistent ID of albumTrack) & tab & (my escapedText(POSIX path of trackFile)) & linefeed
                 end repeat
             end repeat
         end timeout
     end tell
     return output
 end run"""
+)
 
 # argv: flat pairs of track id and expected persistent ID. `track id N` is a direct
 # reference, not a search (measured: 0.58 s for 12); the persistent ID is read before
@@ -187,127 +195,6 @@ REFRESH_IDS_SCRIPT = f"""on run argv
         end timeout
     end tell
     return (refreshedCount as string) & tab & (staleCount as string)
-end run"""
-
-
-# argv: the first and last index, 1-based and inclusive. Read-only. The range is plain
-# `tracks i thru j`, never `file tracks i thru j`, which Music filters from the start of
-# the library on every event (about 5 s a read near the end of 20,000 tracks; why, and
-# what else was measured: library_audit.md, "Why plain track ranges"). Each property is
-# read for the whole range in one event (twelve a batch, whatever its size). Only a file
-# track has a `location`: with any other class in the range, it is read one file track at
-# a time in a `try` that re-raises Music's -1712, so a timeout never reads as "no file".
-# Class and cloud status become text inside the `tell`, where Music's terminology names
-# them. The lists come from separate events, so a library changing between them could
-# pair one track's path with another's ID: every list's length is checked against the
-# first's, and a mismatch errors (a `CallFailed`). The rows are built after the `tell`,
-# from locals alone, so no step can become an Apple event (`POSIX path of` a local, as in
-# LOOKUP_SCRIPT), and joined once; the fields are `list_tracks`'s. `flatText` turns each
-# tab and line break in a name into a space, so no name can split or forge a row; a path
-# is left as Music gives it, for the caller's strict parser. `sizeText` writes a size as
-# exact digits: AppleScript integers stop at 536,870,911, and `as string` writes a larger
-# size, a real, in exponent form (`6.0E+8`), so millions and the rest go out as two
-# integers (checked by hand in an osascript with no Music: 600000123.0 wrote 600000123).
-LIST_TRACKS_SCRIPT = f"""on flatText(theText)
-    if theText is missing value then return ""
-    set savedDelimiters to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to {{tab, linefeed, return}}
-    set theParts to text items of theText
-    set AppleScript's text item delimiters to " "
-    set flatResult to theParts as text
-    set AppleScript's text item delimiters to savedDelimiters
-    return flatResult
-end flatText
-
-on numberText(theNumber)
-    if theNumber is missing value then return "0"
-    return theNumber as string
-end numberText
-
-on sizeText(theSize)
-    if theSize is missing value then return "0"
-    set highPart to theSize div 1000000
-    set lowPart to (theSize mod 1000000) as integer
-    if highPart is 0 then return lowPart as string
-    set lowText to (1000000 + lowPart) as string
-    return (highPart as string) & (text 2 thru -1 of lowText)
-end sizeText
-
-on run argv
-    set lowIndex to (item 1 of argv) as integer
-    set highIndex to (item 2 of argv) as integer
-    tell application "Music"
-        with timeout of {IN_SCRIPT_TIMEOUT_SECONDS} seconds
-            set trackClasses to class of tracks lowIndex thru highIndex of library playlist 1
-            set trackIDs to persistent ID of tracks lowIndex thru highIndex of library playlist 1
-            set trackStatuses to cloud status of tracks lowIndex thru highIndex of library playlist 1
-            set trackAlbums to album of tracks lowIndex thru highIndex of library playlist 1
-            set albumArtists to album artist of tracks lowIndex thru highIndex of library playlist 1
-            set trackArtists to artist of tracks lowIndex thru highIndex of library playlist 1
-            set discNumbers to disc number of tracks lowIndex thru highIndex of library playlist 1
-            set trackNumbers to track number of tracks lowIndex thru highIndex of library playlist 1
-            set trackCompilations to compilation of tracks lowIndex thru highIndex of library playlist 1
-            set trackEnabled to enabled of tracks lowIndex thru highIndex of library playlist 1
-            set trackSizes to size of tracks lowIndex thru highIndex of library playlist 1
-            set allFileTracks to true
-            repeat with trackClass in trackClasses
-                if contents of trackClass is not file track then set allFileTracks to false
-            end repeat
-            if allFileTracks then
-                set trackFiles to location of tracks lowIndex thru highIndex of library playlist 1
-            else
-                set trackFiles to {{}}
-                repeat with k from 1 to count of trackClasses
-                    set trackClass to item k of trackClasses
-                    set trackFile to missing value
-                    if contents of trackClass is file track then
-                        try
-                            set trackFile to location of track (lowIndex + k - 1) of library playlist 1
-                        on error errorText number errorNumber
-                            if errorNumber is -1712 then error errorText number errorNumber
-                        end try
-                    end if
-                    set end of trackFiles to trackFile
-                end repeat
-            end if
-            set savedDelimiters to AppleScript's text item delimiters
-            set AppleScript's text item delimiters to linefeed
-            set classText to trackClasses as text
-            set statusText to trackStatuses as text
-            set classNames to text items of classText
-            set statusNames to text items of statusText
-            set AppleScript's text item delimiters to savedDelimiters
-        end timeout
-    end tell
-    set expectedLength to count of trackIDs
-    if (count of trackClasses) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackFiles) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackStatuses) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackAlbums) is not expectedLength then error "the listed property lists differ in length"
-    if (count of albumArtists) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackArtists) is not expectedLength then error "the listed property lists differ in length"
-    if (count of discNumbers) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackNumbers) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackCompilations) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackEnabled) is not expectedLength then error "the listed property lists differ in length"
-    if (count of trackSizes) is not expectedLength then error "the listed property lists differ in length"
-    if (count of classNames) is not expectedLength then error "the listed property lists differ in length"
-    if (count of statusNames) is not expectedLength then error "the listed property lists differ in length"
-    set trackRows to {{}}
-    repeat with i from 1 to expectedLength
-        set trackFile to item i of trackFiles
-        set trackPath to ""
-        if trackFile is not missing value then set trackPath to POSIX path of trackFile
-        set artistName to item i of albumArtists
-        if artistName is missing value or artistName is "" then set artistName to item i of trackArtists
-        set rowText to (item i of trackIDs) & tab & (item i of statusNames) & tab & (my numberText(item i of discNumbers)) & tab & (my numberText(item i of trackNumbers)) & tab & trackPath & tab & (my flatText(item i of trackAlbums)) & tab & (my flatText(artistName)) & tab & ((item i of trackCompilations) as string) & tab & (item i of classNames) & tab & ((item i of trackEnabled) as string) & tab & (my sizeText(item i of trackSizes))
-        set end of trackRows to rowText
-    end repeat
-    set savedDelimiters to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to linefeed
-    set output to (trackRows as text) & linefeed
-    set AppleScript's text item delimiters to savedDelimiters
-    return output
 end run"""
 
 
@@ -353,8 +240,8 @@ def _failure_reason(result: subprocess.CompletedProcess[str]) -> str:
     return lines[-1] if lines else f"osascript exited {result.returncode}"
 
 
-def _error_number(reason: str) -> int | None:
-    """The error number ending *reason*, `(-1712)` say, or None when it ends in none."""
+def error_number(reason: str) -> int | None:
+    """The error number ending *reason*, `(-1712)` say, or None. Public: imported."""
     match = _TRAILING_ERROR_NUMBER.search(reason)
     return int(match.group(1)) if match else None
 
@@ -366,11 +253,12 @@ def _unexpected(reply: str) -> CallFailed:
     )
 
 
-def _call(script: str, args: Sequence[str], run: Runner) -> str:
+def call(script: str, args: Sequence[str], run: Runner) -> str:
     """Run *script* with *args* as its argv; return stdout or raise a typed outcome.
 
-    `--` precedes the arguments, so one starting with a dash reaches the script as
-    data instead of being parsed as an osascript option.
+    Public: play_count_baseline sends its own script through it. `--` precedes the
+    arguments, so one starting with a dash reaches the script as data instead of
+    being parsed as an osascript option.
     """
     argv = ["osascript", "-e", script]
     if args:
@@ -386,7 +274,7 @@ def _call(script: str, args: Sequence[str], run: Runner) -> str:
         raise CallFailed(f"could not start osascript: {exc}") from exc
     if result.returncode != 0:
         reason = _failure_reason(result)
-        if _error_number(reason) == _APPLE_EVENT_TIMED_OUT:
+        if error_number(reason) == _APPLE_EVENT_TIMED_OUT:
             raise CallTimedOut(reason)
         raise CallFailed(reason)
     return result.stdout
@@ -398,7 +286,7 @@ def is_running(*, run: Runner) -> bool:
     Raises `CallTimedOut` or `CallFailed` when the probe cannot answer; the caller
     treats both as "cannot start" and can name which in its message.
     """
-    reply = _call(IS_RUNNING_SCRIPT, (), run)
+    reply = call(IS_RUNNING_SCRIPT, (), run)
     match = _BOOLEAN_REPLY.fullmatch(reply)
     if match is None:
         raise _unexpected(reply)
@@ -407,7 +295,7 @@ def is_running(*, run: Runner) -> bool:
 
 def _count(script: str, run: Runner) -> int:
     """The one decimal count *script* replies with; any other reply is a failed call."""
-    reply = _call(script, (), run)
+    reply = call(script, (), run)
     match = _COUNT_REPLY.fullmatch(reply)
     if match is None:
         raise _unexpected(reply)
@@ -431,19 +319,20 @@ def refresh_range(first: int, last: int, *, run: Runner) -> None:
     """
     if not 1 <= first <= last:
         raise ValueError(f"not a 1-based inclusive range: {first} to {last}")
-    _call(REFRESH_RANGE_SCRIPT, (str(first), str(last)), run)
+    call(REFRESH_RANGE_SCRIPT, (str(first), str(last)), run)
 
 
 def lookup_by_albums(names: Sequence[str], *, run: Runner) -> str:
     """The raw rows for every file track whose album is one of *names*.
 
-    Each row is `id`, tab, persistent ID, tab, POSIX path, linefeed, and osascript
-    adds one linefeed after the whole reply. Nothing is parsed here: the caller's
+    Each row is `id`, tab, persistent ID, tab, POSIX path (escaped, as
+    `script_text.unescape_field` reverses), linefeed, and osascript adds one linefeed
+    after the whole reply. Nothing is parsed here: the caller's
     strict row parser owns that. No names makes no call and returns "".
     """
     if not names:
         return ""
-    return _call(LOOKUP_SCRIPT, tuple(names), run)
+    return call(LOOKUP_SCRIPT, tuple(names), run)
 
 
 def _validate_pairs(pairs: Sequence[tuple[int, str]]) -> None:
@@ -464,7 +353,7 @@ def refresh_ids(pairs: Sequence[tuple[int, str]], *, run: Runner) -> RefreshCoun
     if not pairs:
         return RefreshCounts(0, 0)
     args = tuple(value for pair in pairs for value in (str(pair[0]), pair[1]))
-    reply = _call(REFRESH_IDS_SCRIPT, args, run)
+    reply = call(REFRESH_IDS_SCRIPT, args, run)
     match = _REFRESH_COUNTS_REPLY.fullmatch(reply)
     if match is None:
         raise _unexpected(reply)
@@ -475,20 +364,3 @@ def refresh_ids(pairs: Sequence[tuple[int, str]], *, run: Runner) -> RefreshCoun
             f" asked about {len(pairs)} pair(s)"
         )
     return counts
-
-
-def list_tracks(first: int, last: int, *, run: Runner) -> str:
-    """The raw rows for tracks *first* to *last* (1-based, inclusive), read-only.
-
-    Each row is persistent ID, cloud status, disc and track number (0 for none),
-    POSIX path (empty for no file, and for every track that is not a file track),
-    album, artist (the album artist, else the track's), compilation flag, class,
-    enabled flag and size in bytes (decimal digits, 0 for none), tab separated and
-    ended by a linefeed; the last two follow the class so the fields before them keep
-    their places. osascript adds one linefeed after the whole reply. Nothing is
-    parsed here: the caller's strict row parser owns that. Raises `ValueError` for a
-    range that cannot exist, before any call is made.
-    """
-    if not 1 <= first <= last:
-        raise ValueError(f"not a 1-based inclusive range: {first} to {last}")
-    return _call(LIST_TRACKS_SCRIPT, (str(first), str(last)), run)

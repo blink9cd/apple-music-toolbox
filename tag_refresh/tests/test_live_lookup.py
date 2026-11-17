@@ -35,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
+import script_text  # noqa: E402 - import follows the sys.path bootstrap above
 
 # The album folder whoever runs this chose; its name is the album name looked up.
 _ALBUM_ENV = "TAG_REFRESH_LIVE_ALBUM"
@@ -73,7 +74,8 @@ def _matching_rows(reply: str, identities: set[tuple[int, int]]) -> list[str]:
         if _PERSISTENT_ID.fullmatch(persistent_id) is None:
             continue
         try:
-            status = os.stat(path)
+            # The script escapes the path; read it back as the real parser does.
+            status = os.stat(script_text.unescape_field(path))
         except OSError:
             continue
         if (status.st_dev, status.st_ino) in identities:

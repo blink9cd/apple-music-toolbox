@@ -24,9 +24,7 @@ Entry point assumptions
 Import-only: no CLI and no output. Every launchctl call goes through the :class:`Launchctl`
 handed in, so a test scripts launchd and never reaches it; :func:`real_launchctl` is the one
 host seam. The shared libraries it imports are found by a bounded upward search from this
-file, which reads only its own folder and the one above it: a sibling folder of the
-library's own name, as this repository lays them out, or one under a ``utilities/``
-folder beside it.
+file, which looks for each library in its own folder and its parent.
 """
 
 from __future__ import annotations
@@ -37,33 +35,33 @@ import plistlib
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from types import MappingProxyType
+from typing import Final, Union
 
 #: The shared libraries this module reaches: the atomic file replacement, the bounded
 #: subprocess runner, and the scheduler artifacts whose label rule a plist must pass.
 _LIBRARIES: Final = ("atomic_write", "bounded_run", "os_schedule_gen")
-#: How many of the starting file's ancestors the search reads: its own folder and the
-#: folder holding that one. Each library is a sibling of this module's folder in both
-#: layouts it ships in, ``<repo>/utilities/<name>`` and an export's ``<root>/<name>``, so
-#: both are found there. Stopping there means that in an export the search never reads
-#: above the export root, where a same-named folder beside a clone would be imported.
+#: How many of the starting file's ancestors the search reads: its own folder and its
+#: parent. Each library is a sibling of this module's folder in both layouts it ships in,
+#: ``<repo>/utilities/<name>`` and an export's ``<root>/<name>``, so the parent finds it
+#: in either. Stopping there means that in an export the search never reads above the
+#: export root, where a same-named folder beside a clone would be imported.
 _ANCESTORS_SEARCHED: Final = 2
 
 
 def _nearest_library(name: str, start: Path) -> Path | None:
     """The nearest folder above *start* holding ``<name>.py``, if any.
 
-    Each ancestor is tried as ``<ancestor>/utilities/<name>`` and then as
-    ``<ancestor>/<name>``, the flattened layout an export ships, and only the first
-    ``_ANCESTORS_SEARCHED`` ancestors are read.
+    Each ancestor is tried as ``<ancestor>/<name>``, and only the first
+    ``_ANCESTORS_SEARCHED`` ancestors are read: its own folder and its parent.
     """
     for ancestor in list(start.parents)[:_ANCESTORS_SEARCHED]:
-        for folder in (ancestor / "utilities" / name, ancestor / name):
-            if (folder / f"{name}.py").is_file():
-                return folder
+        folder = ancestor / name
+        if (folder / f"{name}.py").is_file():
+            return folder
     return None
 
 
@@ -90,6 +88,16 @@ POLL_S: Final = 0.5
 LAUNCHCTL_TIMEOUT_S: Final = 10.0
 #: The pause launchd keeps between two starts of a kept-alive agent that keeps exiting.
 _THROTTLE_S: Final = 10
+#: An agent's restart policy, the plist's ``KeepAlive`` value: ``True`` restarts it after
+#: every exit, and a dictionary of launchd's conditions restarts it only when they hold.
+KeepAlivePolicy = Union[bool, Mapping[str, bool]]
+#: Restart after every exit, a clean one included: for a server that should never stop.
+KEEP_ALIVE_ALWAYS: Final[KeepAlivePolicy] = True
+#: Restart only after a nonzero exit or a crash, so an agent that exits 0 stays stopped
+#: until its next load: for one that ends a refusal no restart can cure that way.
+RESTART_AFTER_FAILURE: Final[Mapping[str, bool]] = MappingProxyType(
+    {"SuccessfulExit": False}
+)
 #: The plist mode: readable by launchd and the account's tools, writable by the account only.
 _PLIST_MODE: Final = 0o644
 
@@ -133,7 +141,15 @@ class ServicePrint:
 
 
 def service_target(uid: int, label: str) -> str:
-    """The agent's service target in *uid*'s GUI domain: ``gui/<uid>/<label>``."""
+    """The agent's service target in *uid*'s GUI domain: ``gui/<uid>/<label>``.
+
+    Raises ValueError for a label os_schedule_gen would refuse as a plist file name, the rule
+    :func:`build_keepalive_plist` applies: a ``/`` would name another target, and a leading
+    ``-`` would read as an option. Every verb here builds its target through this, so each
+    refuses such a label before launchctl runs.
+    """
+    # The plist path is computed only for the check it makes, as build_keepalive_plist does.
+    os_schedule_gen.launchd_plist_path(Path(), label)
     return f"{_domain(uid)}/{label}"
 
 
@@ -209,17 +225,25 @@ def wait_for(
 
 
 def _run_unchecked(
-    ctl: Launchctl, argv: list[str]
+    ctl: Launchctl, argv: list[str], *, label: str
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a launchctl verb whose exit is not the check: the read-back after it is.
 
     Returns the completed process, kept only to explain a read-back that fails, or None on a
     timeout, which is ignored for the same reason: the wait that follows reads the real state.
+    Raises LaunchdError, chained to the OSError, when launchctl cannot be run at all: no
+    read-back could follow, and a caller reports one LaunchdError rather than a traceback.
+    It leads with *label*, as every LaunchdError does, since not every verb's argv names
+    the agent (bootstrap's names only the domain and the plist).
     """
     try:
         return ctl.run(argv, LAUNCHCTL_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return None
+    except OSError as error:
+        raise LaunchdError(
+            f"{label}: could not run launchctl {argv[1]}: {error}"
+        ) from error
 
 
 def _bootstrap_failure(done: subprocess.CompletedProcess[str] | None) -> str | None:
@@ -241,20 +265,20 @@ def install_agent(
 ) -> None:
     """Write *plist*, replace any loaded copy of *label*, and confirm launchd loaded it.
 
-    Raises OSError when the plist cannot be written (nothing is unloaded then), and
-    LaunchdError when launchd does not settle; the plist stays written, so re-running install
-    recovers.
+    Raises ValueError for a label :func:`service_target` refuses, before anything is written;
+    OSError when the plist cannot be written (nothing is unloaded then); and LaunchdError when
+    launchd does not settle, when the plist stays written, so re-running install recovers.
     """
+    target = service_target(ctl.uid, label)
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write.replace_bytes(plist_path, plist, mode=_PLIST_MODE)
-    target = service_target(ctl.uid, label)
     # A first install has nothing to boot out, so its exit is ignored.
-    _run_unchecked(ctl, [LAUNCHCTL, "bootout", target])
+    _run_unchecked(ctl, [LAUNCHCTL, "bootout", target], label=label)
     wait_for(ctl, label, AgentState.ABSENT, deadline_s)
     # Bootstrap's exit codes are unreliable; the read-back below is the confirmation. A
     # non-zero exit is kept only to explain an agent that then never loads.
     done = _run_unchecked(
-        ctl, [LAUNCHCTL, "bootstrap", _domain(ctl.uid), str(plist_path)]
+        ctl, [LAUNCHCTL, "bootstrap", _domain(ctl.uid), str(plist_path)], label=label
     )
     try:
         wait_for(ctl, label, AgentState.LOADED, deadline_s)
@@ -291,7 +315,9 @@ def stop_agent(
     Raises LaunchdError when launchd still reports the agent or answers unknown.
     """
     # An agent that was never loaded makes bootout fail; the wait is the check.
-    _run_unchecked(ctl, [LAUNCHCTL, "bootout", service_target(ctl.uid, label)])
+    _run_unchecked(
+        ctl, [LAUNCHCTL, "bootout", service_target(ctl.uid, label)], label=label
+    )
     wait_for(ctl, label, AgentState.ABSENT, deadline_s)
 
 
@@ -302,12 +328,15 @@ def build_keepalive_plist(
     working_directory: str,
     log_paths: tuple[str, str],
     path_value: str,
+    keep_alive: KeepAlivePolicy = KEEP_ALIVE_ALWAYS,
 ) -> bytes:
-    """The plist of an agent launchd starts at load and restarts whenever it exits.
+    """The plist of an agent launchd starts at load and restarts as *keep_alive* says.
 
     *log_paths* is stdout's file then stderr's; launchd opens them at spawn and does not create
     their folder. *path_value* is the agent's whole PATH, since launchd's own is minimal.
-    Raises ValueError for a label os_schedule_gen would refuse as a plist file name.
+    *keep_alive* is the restart policy: after every exit by default, or a dictionary of
+    launchd's conditions such as `RESTART_AFTER_FAILURE`. Raises ValueError for a label
+    os_schedule_gen would refuse as a plist file name.
     """
     os_schedule_gen.launchd_plist_path(Path(), label)
     stdout_path, stderr_path = log_paths
@@ -317,7 +346,10 @@ def build_keepalive_plist(
             "ProgramArguments": list(program_arguments),
             "WorkingDirectory": working_directory,
             "RunAtLoad": True,
-            "KeepAlive": True,
+            # plistlib writes a dict, not a read-only view of one.
+            "KeepAlive": (
+                keep_alive if isinstance(keep_alive, bool) else dict(keep_alive)
+            ),
             "ThrottleInterval": _THROTTLE_S,
             "ProcessType": "Background",
             "StandardOutPath": stdout_path,

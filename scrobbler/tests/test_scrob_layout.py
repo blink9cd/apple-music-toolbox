@@ -92,6 +92,11 @@ class LoadLayoutTest(LayoutCase):
     def test_the_loader_s_keys_are_the_file_s(self) -> None:
         self.assertEqual(scrob_layout.layout_keys(), _KEYS)
 
+    def test_the_app_folder_is_the_display_name(self) -> None:
+        # macOS's privacy lists show the bundle's folder name, so the two must agree.
+        layout = scrob_layout.load_layout()
+        self.assertEqual(layout.app_name, f"{layout.display_name}.app")
+
     def test_no_value_is_absolute(self) -> None:
         for key, value in _real_document().items():
             with self.subTest(key=key):

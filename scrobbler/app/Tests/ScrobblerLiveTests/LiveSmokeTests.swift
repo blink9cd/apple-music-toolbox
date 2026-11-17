@@ -20,6 +20,20 @@ func musicRunning() -> Bool {
   /// How long to wait for Music to post a notice of its own.
   static let noticeWait: Duration = .seconds(10)
 
+  /// Run first, so the prompt (if any) comes from the request with no time limit rather
+  /// than from a read. With Music quit it answers not running and must not launch Music;
+  /// with Music running it waits for the user and must come back granted.
+  @Test(.enabled(if: liveSwitchOn))
+  func thePermissionRequestAnswersWithoutLaunchingMusic() async {
+    let wasRunning = musicRunning()
+    let bridge = LiveMusicBridge()
+    let answer = await withCheckedContinuation { continuation in
+      bridge.requestPermission { continuation.resume(returning: $0) }
+    }
+    #expect(wasRunning || !bridge.isMusicRunning(), "the permission request launched Music")
+    #expect(answer == (wasRunning ? .granted : .musicNotRunning), "the answer was \(answer)")
+  }
+
   @Test(.enabled(if: liveSwitchOn))
   func readsTheCurrentTrackWithoutControllingPlayback() async throws {
     // Run once with Music quit: neither making the bridge nor reading may launch it.

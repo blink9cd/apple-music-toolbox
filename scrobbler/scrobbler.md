@@ -161,7 +161,12 @@ relay's pages go idle at once instead of after the stale window. Each goes two w
 Everything lives under the data folder, `~/Library/Application Support/listensmith/scrobbler/`
 (written `<data>` here), each folder mode 0700 and each file 0600. Every folder is checked,
 through an open that does not follow a symbolic link, to belong to you and to be private
-before anything is written in it. Every file is replaced atomically: a `.tmp-<uuid>` file
+before anything is written in it. The app makes its own folders the same way at its start:
+the data folder, each missing folder above it, and `queue`, `refused`, `state` and `logs`
+are each made mode 0700 and opened inside the folder above without following a link, so a
+link at any of them is refused (the app exits 0, *One copy at a time*) and nothing is made
+through one. A folder that already exists above the data folder is yours and is used as
+found. Every file is replaced atomically: a `.tmp-<uuid>` file
 beside the target, written, flushed, renamed over the target, then the folder flushed.
 
 | Path | What it holds |
@@ -187,8 +192,14 @@ straight to `refused/` with the fixed finding above. It counts in `refused_count
 `last_queued_at` and no `last_send_error`, and is never sent.
 
 `status.json` is written at start and every 30 s whether or not anything plays, so its
-heartbeat means the app is alive. It is format 1, every time is Unix seconds as a JSON
-number, and every key is written, with `null` for anything not yet known:
+heartbeat means the app is alive. It is also written when a request for Automation is
+left waiting, when that request's answer arrives, and when Music.app quitting gives the
+request up, so the pending time below is never stale by a heartbeat. The one exception
+is a request made after a denial, or after a request that failed: it is made
+again at every poll and answers without a prompt, so it writes nothing of its own, and if
+it does hang, its pending time reaches the file at most one heartbeat late. It is format 1,
+every time is Unix seconds as a JSON number, and every key is written, with `null` for
+anything not yet known:
 
 | Key | Meaning |
 | --- | --- |
@@ -201,7 +212,12 @@ number, and every key is written, with `null` for anything not yet known:
 | `last_send_error` | The last failure, in the wording below; `null` after a handled answer |
 | `unrecordable_count` | Plays skipped as unrecordable |
 | `automation_denied` | Whether macOS refused the app's request to read Music.app |
+| `automation_asked_at` | When the request for Automation still in flight began, or `null` when none is |
 | `now_playing` | The newest `playing_now` record, or `null` |
+
+`automation_asked_at` joined format 1 without a new format number, because it is
+optional: a reader that predates it ignores the key, and `status` reads a file without it,
+from an app that predates it, as no request in flight.
 
 ### Sending: the response table
 
@@ -260,6 +276,12 @@ other local accounts, any of them can listen on a loopback port, so keep the sto
 relay running while the app runs, or stop the agent with `scrobbler.py uninstall` while
 either is down.
 
+This is an accepted assumption, not an oversight: the scrobbler, like the store and the relay,
+assumes no hostile second account on the Mac (the store's `store.md`, *No hostile second
+account*). On a Mac where that does not hold, the fix is a change to listensmith's contract
+and all three programs (for example, a socket file in a folder only the user can open), not to
+the scrobbler alone.
+
 ### The config
 
 `~/.config/listensmith/scrobbler.json`, optional, read afresh for each send. With no file
@@ -275,25 +297,51 @@ When they are equal, the error names `relay_port` if the file set it, else `stor
 
 Any other key, a value outside the rule, a file that is not one JSON object, and a file
 that is not a regular file each refuse the whole config, named by key, never by content.
+The file is opened without following a symbolic link, so a link at its path is refused as
+not a regular file, a link to nothing included, rather than followed or read as no file.
 
 ### One copy at a time
 
-The app takes an exclusive, non-waiting `flock` on `<data>/state/scrobbler.lock` before it
-does anything else, and the kernel drops it when the process ends, however it ends.
+The app takes an exclusive, non-waiting `flock` on `<data>/state/scrobbler.lock` before
+anything but the log trim (*Its logs*), and the kernel drops it when the process ends,
+however it ends.
 
-- **Held by another copy:** one line, `another scrobbler is already running`, and exit 0.
-- **The lock file cannot be opened** (a symbolic link at its path included): one line,
-  `the instance lock file could not be opened`, and exit 1.
+- **Held by another copy:** one line, `another scrobbler is already running`, and exit 1.
+- **The lock file cannot be opened** (a symbolic link at its path, at its `state` folder,
+  or at the data folder included, so nothing is made through one): one line,
+  `the instance lock file could not be opened`, and exit 0.
 
-The launch agent restarts the app on any exit, at most once every 10 s. So while a copy
-you started by hand holds the lock, the agent's copy starts, finds the lock held and exits
-every 10 s, until the hand-run copy exits.
+The launch agent restarts the app only after a failed exit or a crash, at most once every
+10 s (its plist's `KeepAlive` is `{SuccessfulExit: false}`). The app exits 1 on a failure a
+fresh copy may get past, and 0 on a refusal no restart can cure, so a refusal ends instead
+of writing the same line to `err.log` every 10 s:
+
+| Exit | When | The agent |
+| --- | --- | --- |
+| 1 | another copy holds the lock, or the run loop stopped; also any crash | starts a fresh copy after 10 s |
+| 0 | the lock file cannot be opened, or the data folders cannot be made | stays loaded but stopped |
+
+So while a copy you started by hand holds the lock, the agent's copy starts, finds the lock
+held and exits every 10 s, until the hand-run copy exits. After a refusal, fix what its
+line in `err.log` names and re-run `install`, which loads the agent again; until then
+`status` reports the stopped app's heartbeat as too old.
+
+### Its logs
+
+launchd opens `out.log` and `err.log` for appending when it starts the app, and never
+rotates them. So at each start, before anything else, the app trims each one that is over
+1 MiB to its last whole lines within 64 KiB, which bounds a log to about 1 MiB plus what
+one run writes. Only the agent's own log is trimmed: a standard error that is a terminal,
+or a file you redirected it to, is left alone. A second copy you start by hand with its
+standard error pointed at `err.log` may trim the running agent's log, which is harmless:
+launchd's descriptor is opened for appending, so the agent's next line lands at the new
+end. A trim whose read of the log fails or comes up short leaves the log as it is.
 
 ### The app's command line
 
 | Command | What it does | Exit |
 | --- | --- | --- |
-| `run` | runs the app until it is stopped; the only way to start it, and the argument the launch agent's plist passes | 0 when another copy holds the lock, 1 on a lock, folder or run-loop failure |
+| `run` | runs the app until it is stopped; the only way to start it, and the argument the launch agent's plist passes | 1 when another copy holds the lock or the run loop stops, 0 when the lock file or the data folders cannot be used (*One copy at a time*) |
 | `--version` | prints the version | 0 |
 | `replay --trace <file> --out <folder>` | replays a recorded trace into a queue folder; see *The replay sample* | 0 written, 1 a replay error |
 
@@ -308,14 +356,62 @@ error number only, never with a message, a script result or a track value.
 ### Talking to Music.app
 
 The live layer is the only code that touches Music.app, and it holds no decision a test
-could reach. Each read runs one of two AppleScripts inside `with timeout of 5 seconds`.
+could reach.
+
+**Permission comes first.** No read runs until macOS says the app may control Music.app
+(Automation). The app asks with `AEDeterminePermissionToAutomateTarget`, which shows the
+consent prompt when the user has not yet answered it and waits, with no time limit, until
+they click; the wait runs off the main thread. It asks only while Music.app runs, so asking
+never launches it. A read is not used to ask because its Apple event's time limit would
+withdraw the prompt before anyone could answer it. Until the answer is a grant, each read
+the app would have made is skipped and remembered, and each start, notice and poll asks
+again, one request at a time; once the user has decided, asking shows no prompt. A grant
+makes the skipped reads at once, so the play under way is picked up without waiting for
+the next track. A refusal sets `automation_denied`, which `status` reports, and is asked
+about again at each notice and poll, so turning the app's switch on in System Settings >
+Privacy & Security > Automation clears it.
+
+While a request waits, `status.json` carries when it began in `automation_asked_at`, and
+`status` reports one that has waited longer than 10 s: a prompt nobody has answered would
+otherwise read as healthy, since nothing is denied and the heartbeat goes on. Two
+exceptions: a request made after a denial or a failed request reaches the file only at
+the next heartbeat (*The files it writes* above), and a stopped app's request is
+not reported, since the stale heartbeat is the one reason given (*status* below). Each
+request has a number, and only the newest one's answer is taken. Music.app quitting gives
+up the request in flight: the pending time clears, the next notice or poll asks anew, and
+the old request's answer, if it ever comes, is dropped. An answer of "not running" (-600,
+or -609 when Music.app quit while the request was under way) that arrives while Music.app
+is running is stale too, from a quit and relaunch the app did not see: it closes nothing,
+and the next notice or poll asks again. A request that never returns while Music.app stays
+running is not asked again on a timer, because the app cannot tell it from a prompt the
+user has not answered yet; `status` is what surfaces it.
+
+Each read runs one of two AppleScripts inside `with timeout of 5 seconds`.
 The reads run on the app's main thread, so a hung Music.app can block the app for up to
-5 s per Apple event. An AppleScript error maps to a reason: -1743 is Automation denied,
--1728 is no current track, -600 and -609 mean Music.app quit mid-read, and any other number
-reads as a malformed answer. The app also watches for Music.app quitting; if that notice
+5 s per Apple event. An AppleScript error maps to a reason: -1743 and -1744 are Automation
+denied (a refused position read sets `automation_denied` and asks again at the next poll),
+-1712 is a timed-out read, -1728 is no current track, -600 and -609 mean Music.app quit
+mid-read, and any other number reads as a malformed answer. A timed-out read is logged and
+not final: the app asks for permission again before its next read, so a read held by a
+prompt that reappeared waits on the request with no time limit, and a timed-out snapshot
+is read again once the grant is confirmed. The app also watches for Music.app quitting; if that notice
 never arrives, the next read finds Music.app gone and closes the play the same way.
 Between the in-script running check and the first Apple event there is an unavoidable
 window of well under a millisecond in which a launch could race the check.
+
+Each script joins its fields with U+001F. The snapshot writes each U+001F, tab,
+linefeed and carriage return inside a text field (a title, an artist, a path) as a
+percent sign and that character's two hex digits, and each percent sign as `%25`, and
+the parser undoes it, so a title holding the separator neither splits the result nor
+fails the snapshot. AppleScript's text search works on whole characters, so a control
+character followed by a combining mark is one character it does not match; the script
+then checks the text's code points and escapes such a control from them. A percent sign
+fused with a following mark is left as it is, and the parser keeps a sign that begins
+no escape, so that title still reads back. The handler is the one the toolbox's Python
+listing scripts share (`../tag_refresh/src/script_text.py`); a suite there holds the Swift
+copy equal to it and runs it through `osascript`, with no Music.app. The parser drops a
+text field over three times the 4096-byte cap before decoding it, since it could only
+decode past the cap. The position read carries no text, so it escapes nothing.
 
 **The tripwire.** Creating the live bridge inside a test runner (an `xctest` or
 `swiftpm-testing-helper` process, or any path holding a `.xctest` bundle) stops the
@@ -329,7 +425,8 @@ every later gate run in that shell reach Music.app.
 - that the running Music.app has the favorited, disliked, album favorited and album
   disliked properties (a Music.app without them fails the snapshot as malformed, and the
   play falls back to the notice's fields);
-- that compiling a script that names Music.app does not launch it;
+- that compiling a script that names Music.app does not launch it, nor does the
+  permission request, which answers "not running" while Music.app is quit;
 - that the quit notice arrives in an app with no `NSApplication` object;
 - that the date parts, the location read and the length ceiling parse on real tracks, and
   that the notice's persistent ID matches the snapshot's.
@@ -338,8 +435,9 @@ every later gate run in that shell reach Music.app.
 
 These are `scrobbler.py`'s; the app's own are above. A refusal (a linked worktree, no
 signing identity, a signing setting inside a checkout, a layout file the tool cannot
-trust) is one `ERROR:` line and exit 2; a build, sign, verify or launchd step that fails is
-one `ERROR:` line and exit 1.
+trust) is one `ERROR:` line and exit 2; a build, sign, verify or launchd step that fails,
+a launchctl that cannot be run included, or any other `OSError` is one `ERROR:` line and
+exit 1, never a traceback.
 
 | Command | What it does | Exit |
 | --- | --- | --- |
@@ -351,7 +449,7 @@ one `ERROR:` line and exit 1.
 
 | Option | Command | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `--out DIR` | `build` | yes | none | the folder to assemble `listensmith scrobbler.app` in; one already holding the bundle is refused, never overwritten |
+| `--out DIR` | `build` | yes | none | the folder to assemble `Listensmith Scrobbler.app` in; one already holding the bundle is refused, never overwritten |
 | `--sign` | `build` | no | off | sign the bundle with the configured identity, then verify it strictly |
 | `--session-check` | `status` | no | off | one line per problem, nothing when healthy or not installed, always exit 0 |
 
@@ -362,7 +460,17 @@ data folder's `.scratch` folder, keyed on the package's path. A build never writ
 the checkout, and never into a shared temporary folder, where another user on the Mac
 could replace the product between the build and the signature. The data folder, the
 scratch folder and its parent are each mode 0700, and a symbolic link planted in place of
-any of them is refused. The scratch folder stays between builds: it is SwiftPM's
+any of them, before the build or swapped in after the folder is made, is refused, as is a
+folder of another user: each is opened without following a link and checked and chmodded
+through that one descriptor. Any folder above the data folder that does not exist yet
+(`listensmith/` on a first install, say) is made the same way: each level is made and
+opened inside the one above it without following a link, so none is reached through a link
+swapped in while it is made, and each is mode 0700. A folder that already exists above the
+data folder, such as `~/Library/Application Support`, is yours and is used as found. That
+open needs read permission, so a folder of yours you
+cannot read (left at mode 000, say) is named and refused, by `build --out` and `install`
+alike, rather than chmodded back: restore it with `chmod 700` on the named folder. The
+scratch folder stays between builds: it is SwiftPM's
 incremental cache. SwiftPM is asked where it put the product (`--show-bin-path`) rather than the
 layout being assumed. Inside the bundle's Contents folder are the executable, in MacOS, and Info.plist;
 the property list names the bundle ID, the display name, the executable, the layout's
@@ -378,6 +486,9 @@ reads, by swift_gate's own reader:
 ```toml
 identity = "<codesign identity>"
 ```
+
+To find an identity, or make one, see *Getting a signing identity* in the
+[project README](../README.md).
 
 The file must live outside every checkout, even while absent, because a file created
 inside one is one `git add` from a commit; such a setting is refused, and so is an absent
@@ -395,17 +506,27 @@ swift_gate's redaction, which scrubs certificate names and team IDs, before it i
    inherited git location settings dropped, so it answers about the entry script's own
    folder.
 2. Reads the signing identity, refusing as above.
-3. Builds, signs and verifies a new bundle in `.staging-<pid>/` inside the data folder, so
-   a failed build leaves the running app and its agent untouched.
+3. Removes the `.staging-<pid>/` folders an install whose process is gone left in the
+   data folder (one it cannot remove is a warning), then builds, signs and verifies a new
+   bundle in `.staging-<pid>/` of its own inside the data folder, so a failed build
+   leaves the running app and its agent untouched.
 4. Asks launchd about the agent. An unexpected answer is exit 1 before anything is
    replaced, since the swap deletes the old app. A loaded agent is stopped and its plist
    kept, so a failure from here on still reads as installed in `status`.
-5. Swaps the bundle in: the old one renamed aside, the new one renamed in, the old one
-   deleted. A failed rename puts the old one back. An aside folder an earlier run left is
-   removed first. An old app that cannot be deleted is a warning, not a failure: the new
-   app is already in place.
-6. Writes the agent's plist (the installed app's executable with `run`, kept alive, from
-   the data folder, logging to out.log and err.log in its logs folder, `PATH` `/usr/bin:/bin`)
+5. Swaps the bundle in: the new one and the old one exchanged in one atomic step, so an
+   app is at the path at every moment, then the staging folder, now holding the old one,
+   deleted. A failed exchange moves nothing. An old app that cannot be deleted is a
+   warning, not a failure: the new app is already in place. Then any other `.app` folder in the data folder whose
+   Info.plist carries the scrobbler's bundle id, a copy left under an earlier `app_name`,
+   is deleted the same way. It is found by bundle id, never by a remembered name, so every
+   rename is covered; a link is never followed, and a folder without a readable Info.plist
+   is kept. The installed app is told apart by the folder entry it is, never by its
+   spelling: on a volume that ignores case (default APFS), a rename that changes only case
+   exchanges into the old entry, which then takes the new name's exact spelling and is
+   kept. The bundle id never changes, since macOS keys the Automation grant to it and
+   the signing identity, so a rename keeps the grant.
+6. Writes the agent's plist (the installed app's executable with `run`, restarted only
+   after a failed exit or a crash, from the data folder, logging to out.log and err.log in its logs folder, `PATH` `/usr/bin:/bin`)
    and loads it, confirmed by launchd's own read-back.
 7. Polls status.json, in the data folder's state folder, until the app reports a start
    newer than the moment the old agent was stopped, waiting 0.5, 1, 2, then 4 s between
@@ -416,17 +537,27 @@ swift_gate's redaction, which scrubs certificate names and team IDs, before it i
 A file-system failure on the way, such as a LaunchAgents folder that cannot be written, is
 one `ERROR:` line and exit 1.
 
-At the first play, macOS asks whether listensmith scrobbler may control Music
-(Automation). Allow it, or no play is logged.
+macOS then asks whether Listensmith Scrobbler may control Music (Automation): at once
+when Music.app is running as the app starts, otherwise at the first play, pause or track
+change, since the app watches Music's player notices and not its launch. The prompt stays
+up until it is answered. Allow it, or no play is logged. The last line `install` prints
+says which: when the status that confirmed the start already carries a request in flight
+(`automation_asked_at`), whatever its age, it says a request is in flight and to allow
+any prompt showing; otherwise it says when the prompt will come. A request macOS answers
+without a prompt, because the user decided earlier, can still be in flight for the few
+milliseconds in which `install` reads the status, which is why that line says "if".
 
 ### status
 
 Exit 2 "not installed" when the agent's plist is absent, asking nothing else. Otherwise,
 "cannot judge" (exit 2) when launchctl gives an unexpected answer or codesign cannot run,
 and "needs attention" (exit 1) for each of: the agent not loaded; the app missing; the
-app failing `codesign --verify --strict`; `status.json` missing, unreadable, not a
-regular file, over 64 KiB, not JSON (Infinity and NaN included), of another format, or
-holding a time that is not finite; a heartbeat older than 90 s; Automation denied; any play the store refused; a
+app failing `codesign --verify --strict`; `status.json` missing, unreadable, a
+symbolic link or anything else not a regular file, over 64 KiB, not JSON (Infinity and
+NaN included), of another format, or
+holding a time that is not finite; a heartbeat older than 90 s; Automation denied; an
+Automation prompt that has waited longer than 10 s for an answer, with how long, unless the
+heartbeat reason is given, since a stopped app's pending time is stale; any play the store refused; a
 last send error a retry cannot cure (`token refused`, `token unreadable: ...`,
 `config refused: ...`, `queue unreadable`, `queue unwritable`); and a queued play older than an hour, with the last send error.
 Text the app wrote is shown cut to 120 characters, with any character that does not print
@@ -434,7 +565,7 @@ replaced by `?`, so it can neither forge a line nor reach the terminal as a cont
 The output is the verdict line, one `- <kind>: <text>` line per reason, then a table:
 
 ```text
-listensmith scrobbler: HEALTHY (exit 0)
+Listensmith Scrobbler: HEALTHY (exit 0)
 
 | Item | State |
 | --- | --- |
@@ -448,7 +579,7 @@ listensmith scrobbler: HEALTHY (exit 0)
 ```
 
 `--session-check` is the session-start hook's form: one line per reason,
-`listensmith scrobbler: <kind> -- <text>; details: scrobbler.py status`, with the home
+`Listensmith Scrobbler: <kind> -- <text>; details: scrobbler.py status`, with the home
 folder written as `$HOME`, nothing when healthy or not installed, and always exit 0; a
 layout file it cannot trust is one `session check failed` line, naming no path. Every
 launchctl and codesign call it makes is clamped to one 20 s budget.
@@ -490,11 +621,16 @@ For the person who installs it, once per Mac:
    reinstalls.
 3. From the repository's main checkout, run `scrobbler.py install`. It ends once the new app has
    reported its start.
-4. Play a track. macOS asks once whether listensmith scrobbler may control Music; allow
-   it. The prompt reads: "listensmith scrobbler reads the track Music is playing so it can
-   log your plays on this Mac. It never changes playback or your library."
+4. Allow the Automation prompt. macOS asks once whether Listensmith Scrobbler may control
+   Music: at once when Music.app was running as the app started (so it may appear during
+   step 3), otherwise at the first play, pause or track change. Opening Music.app alone
+   does not ask. The prompt waits for an answer however long it takes. It reads:
+   "Listensmith Scrobbler reads the track Music is playing so it can log your plays on
+   this Mac. It never changes playback or your library."
 5. Run `scrobbler.py status`: `HEALTHY` with a recent heartbeat, and the backlog back at 0
-   after the first send.
+   after the first send. While the prompt of step 4 is still unanswered it reads
+   `NEEDS ATTENTION` instead, naming the prompt and how long it has waited, once that is
+   more than 10 s.
 6. To hear about a problem without asking, run `scrobbler.py status --session-check` from
    a shell's startup file or a session-start hook: it prints nothing when healthy.
 
@@ -506,7 +642,8 @@ only once its queue is empty.
 
 ## The live smoke test
 
-The live layer is excluded from coverage, so this test is what proves it. It reads the
+The live layer is excluded from coverage, so this test is what proves it. It asks for the
+Automation permission, reads the
 player's position and the current track, compares the persistent IDs, and waits up to 10 s
 for a notice; it never controls playback and prints no track value. From the `app/`
 folder:
@@ -517,16 +654,20 @@ SCROBBLER_LIVE=1 swift test --scratch-path "$(mktemp -d)" --filter LiveSmokeTest
 
 The outside `--scratch-path` keeps SwiftPM's `.build` out of the tree. Run it twice:
 
-1. **With Music.app quit.** The first test passes, reporting Music.app not running, and
-   checks Music.app is still not running after the bridge is made and after both reads;
-   the snapshot test is skipped. Confirm by eye that Music.app did not open.
+1. **With Music.app quit.** The permission test and the read test pass, reporting
+   Music.app not running, and check Music.app is still not running after the bridge is
+   made, after the permission request and after both reads; the snapshot test is skipped.
+   Confirm by eye that Music.app did not open.
 2. **With a local file track playing**, and skip to the next track within 10 s of
-   starting the run, so a notice arrives to compare. Both tests pass. When no notice
+   starting the run, so a notice arrives to compare. All three tests pass. When no notice
    arrives, the test prints `no notice arrived within 10 s; skip a track to exercise it`.
+
+The permission test runs first and asks the way the app does: with Music.app running it
+waits for any prompt, however long it stays up, and must come back granted.
 
 A stopped player with Music.app running fails the snapshot test, which needs a current
 track. Under `swift test` macOS asks whether the terminal may control Music, not the app;
-a denial fails the first test as Automation denied.
+a denial fails the permission test, and the read test as Automation denied.
 
 ## The replay sample
 

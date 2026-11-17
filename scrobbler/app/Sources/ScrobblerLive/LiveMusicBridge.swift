@@ -73,6 +73,35 @@ import os
     observers = [(distributed, notices), (workspace, quits)]
   }
 
+  /// Ask the system whether this app may script Music, prompting the user when they have
+  /// not yet answered. The call blocks until they do, with no time limit, so it runs on a
+  /// background queue and `done` gets the answer back on the main actor. Music not running
+  /// is answered at once, so the request can never launch it.
+  public func requestPermission(
+    _ done: @escaping @MainActor @Sendable (AutomationPermission) -> Void
+  ) {
+    guard isMusicRunning() else { return done(.musicNotRunning) }
+    DispatchQueue.global(qos: .utility).async {
+      let answer = AutomationPermission(status: Int(Self.determinePermission()))
+      DispatchQueue.main.async { MainActor.assumeIsolated { done(answer) } }
+    }
+  }
+
+  /// `AEDeterminePermissionToAutomateTarget` for Music, by its bundle ID, for any event,
+  /// asking the user if needed. Blocks until the user answers.
+  private nonisolated static func determinePermission() -> OSStatus {
+    var target = AEAddressDesc()
+    let bundleID = Array(MusicApp.bundleID.utf8)
+    let made = bundleID.withUnsafeBytes { bytes in
+      AECreateDesc(
+        DescType(typeApplicationBundleID), bytes.baseAddress, bytes.count, &target)
+    }
+    guard made == noErr else { return OSStatus(made) }
+    defer { AEDisposeDesc(&target) }
+    return AEDeterminePermissionToAutomateTarget(
+      &target, AEEventClass(typeWildCard), AEEventID(typeWildCard), true)
+  }
+
   /// Whether Music is running, asked of the workspace, which never launches it.
   public func isMusicRunning() -> Bool {
     !NSRunningApplication.runningApplications(withBundleIdentifier: MusicApp.bundleID).isEmpty

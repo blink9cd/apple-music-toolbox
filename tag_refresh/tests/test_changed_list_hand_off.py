@@ -33,12 +33,12 @@ import refresh_core  # noqa: E402 - import follows the sys.path bootstrap above
 import refresh_fixtures as rf  # noqa: E402 - import follows the sys.path bootstrap above
 
 settings.register_profile(
-    "fuzz_gate_deterministic",
+    "deterministic",
     derandomize=True,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
-settings.load_profile("fuzz_gate_deterministic")
+settings.load_profile("deterministic")
 
 #: This tool's clean exit.
 _OK = 0

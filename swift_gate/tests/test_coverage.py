@@ -12,13 +12,26 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from _fixtures import export_data, export_functions
 
 import swgate_coverage
 from swgate_model import ParseError
+
+
+# The deterministic profile fuzz_gate's convention registers (fuzz_gate.md, "Determinism"):
+# derandomized so the in-suite run is reproducible, with no per-example deadline and no
+# too_slow check, so machine load cannot fail a property that holds. Loaded at import,
+# before any @given below is decorated, because a property snapshots its settings then.
+settings.register_profile(
+    "deterministic",
+    derandomize=True,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.load_profile("deterministic")
 
 LIB = "Sources/Floor/Floor.swift"
 

@@ -127,23 +127,6 @@ def real_wiring() -> Wiring:
 # --- The options ---------------------------------------------------------------------
 
 
-class _HelpFormatter(
-    help_formatter.ReqAwareDefaultsFormatter, argparse.RawDescriptionHelpFormatter
-):
-    """Every real default shown, the epilog's breaks kept.
-
-    The two bases override different methods, so they compose. A default of None is no
-    value a person could type, so it is not shown: each such option's help says instead
-    what leaving it out means.
-    """
-
-    def _get_help_string(self, action: argparse.Action) -> str | None:
-        """*action*'s help, with its default appended unless that default is None."""
-        if action.default is None:
-            return action.help
-        return super()._get_help_string(action)
-
-
 _EPILOG = f"""\
 Prerequisites:
   macOS, with Music.app already running: it is asked whether it is running and is
@@ -195,11 +178,15 @@ class _GivenOnce(argparse.Action):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The CLI: every argument a named option, every real default shown."""
+    """The CLI: every argument a named option, every real default shown.
+
+    The formatter keeps the epilog's breaks and hides a None default: no one types
+    it, so each such option's help says instead what leaving it out means.
+    """
     parser = argparse.ArgumentParser(
         description="Make Music.app reread the tags of MP3s: the whole library, or the "
         "files named.",
-        formatter_class=_HelpFormatter,
+        formatter_class=help_formatter.RawNoneHidingFormatter,
         epilog=_EPILOG,
     )
     parser.add_argument(

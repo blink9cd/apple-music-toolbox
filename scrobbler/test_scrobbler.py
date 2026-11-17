@@ -9,8 +9,11 @@ Every command runs in-process, with its output captured; nothing reaches the rea
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import json
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -26,6 +29,27 @@ import _scrob_fixtures as fx  # noqa: E402 - import follows the sys.path bootstr
 import scrobbler  # noqa: E402 - import follows the sys.path bootstrap above
 
 
+#: The checked-in --help text of the command line and of each command.
+_GOLDEN_DIR = _TOOL_ROOT / "tests" / "golden"
+#: The width every --help golden was written at; argparse wraps to the terminal's.
+_HELP_COLUMNS = "80"
+#: What every in-process run sets: no color, so argparse's usage, help and errors are
+#: plain text that an assertion can search and a golden can match.
+_NO_COLOR = {"NO_COLOR": "1"}
+#: The variables that turn argparse's color on (3.14 on); removed for each run, and
+#: restored after it with the rest of the environment.
+_COLOR_FORCING = ("FORCE_COLOR", "PYTHON_COLORS")
+#: Each --help golden's file, by the command whose help it is ("" is the top level).
+_HELP_GOLDENS = {
+    "": "help.txt",
+    "version": "help-version.txt",
+    "build": "help-build.txt",
+    "install": "help-install.txt",
+    "uninstall": "help-uninstall.txt",
+    "status": "help-status.txt",
+}
+
+
 def _grouped_suite() -> unittest.TestSuite:
     """Every test in tests/, discovered by walking the directory."""
     suite_dir = _TOOL_ROOT / "tests"
@@ -35,9 +59,15 @@ def _grouped_suite() -> unittest.TestSuite:
 
 
 def _run(*argv: str, host: fx.scrob_host.Host | None = None) -> tuple[int, str, str]:
-    """Run the command line in-process; return its exit code, stdout and stderr."""
+    """Run the command line in-process, uncolored; return its exit code, stdout, stderr."""
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+    with (
+        mock.patch.dict(os.environ, _NO_COLOR),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
+        for forcing in _COLOR_FORCING:
+            os.environ.pop(forcing, None)
         try:
             code = scrobbler.main(list(argv), prog="scrobbler", host=host)
         except SystemExit as stopped:
@@ -103,7 +133,7 @@ class BuildCommandTest(CommandCase):
     def test_a_build_is_exit_0(self) -> None:
         out_dir = self.kit.home.parent / "out"
         self.assertEqual(self.run_cli("build", "--out", str(out_dir)), 0)
-        self.assertTrue((out_dir / "listensmith scrobbler.app").is_dir())
+        self.assertTrue((out_dir / "Listensmith Scrobbler.app").is_dir())
 
     def test_a_failed_build_is_exit_1(self) -> None:
         self.kit.tools.build_rc = 1
@@ -174,7 +204,7 @@ class StatusCommandTest(CommandCase):
         self.kit.write_status()
         self.assertEqual(self.run_cli("status"), 0)
         out = self.kit.out.getvalue()
-        self.assertTrue(out.startswith("listensmith scrobbler: HEALTHY (exit 0)\n"))
+        self.assertTrue(out.startswith("Listensmith Scrobbler: HEALTHY (exit 0)\n"))
         self.assertIn("| Item | State |", out)
 
     def test_no_install_exits_2(self) -> None:
@@ -200,7 +230,7 @@ class StatusCommandTest(CommandCase):
         with mock.patch.object(scrobbler, "LAYOUT_FILE", broken):
             self.assertEqual(self.run_cli("status", "--session-check"), 0)
         (line,) = self.kit.out.getvalue().splitlines()
-        self.assertTrue(line.startswith("listensmith scrobbler: session check failed"))
+        self.assertTrue(line.startswith("Listensmith Scrobbler: session check failed"))
         self.assertNotIn(str(self.kit.home), line)
 
     def test_an_untrusted_layout_is_exit_2_on_the_host_stream(self) -> None:
@@ -209,6 +239,76 @@ class StatusCommandTest(CommandCase):
         with mock.patch.object(scrobbler, "LAYOUT_FILE", broken):
             self.assertEqual(self.run_cli("status"), 2)
         self.assertIn("JSON object", self.error_line())
+
+
+class OSErrorTest(CommandCase):
+    """An OSError escaping any command is one ERROR line and exit 1, never a traceback."""
+
+    #: One argv per command, each reaching the layout read the test makes fail.
+    COMMANDS = (
+        ("version",),
+        ("build", "--out", "unused"),
+        ("install",),
+        ("uninstall",),
+        ("status",),
+    )
+
+    def assert_one_error_line(self, *argv: str) -> str:
+        """Run `argv`: exit 1, and the kit's stderr is one ERROR line, no traceback."""
+        self.kit.err.seek(0)
+        self.kit.err.truncate()
+        self.assertEqual(self.run_cli(*argv), scrobbler.EXIT_FAILED)
+        err = self.kit.err.getvalue()
+        self.assertNotIn("Traceback", err)
+        (line,) = err.splitlines()
+        self.assertTrue(line.startswith("ERROR: "), line)
+        return line
+
+    def test_each_command_reports_an_oserror_as_one_line(self) -> None:
+        failure = PermissionError(13, "Permission denied", "invented")
+        for argv in self.COMMANDS:
+            with (
+                self.subTest(command=argv[0]),
+                mock.patch.object(
+                    scrobbler.scrob_layout, "load_layout", side_effect=failure
+                ),
+            ):
+                self.assertIn("Permission denied", self.assert_one_error_line(*argv))
+
+    def _unrunnable_launchctl(self, but_print: int | None = None) -> None:
+        """Make launchctl calls raise, as on a host where it cannot launch.
+
+        With `but_print`, `launchctl print` alone still answers, exiting with that code,
+        so a command gets past its state read to a bootout or bootstrap.
+        """
+        missing = FileNotFoundError(2, "No such file or directory", "launchctl")
+
+        def answer(
+            argv: list[str], _timeout_s: float
+        ) -> subprocess.CompletedProcess[str]:
+            if but_print is not None and argv[1] == "print":
+                return subprocess.CompletedProcess(argv, but_print, "", "")
+            raise missing
+
+        unrunnable = mock.Mock(side_effect=answer)
+        launchctl = dataclasses.replace(self.kit.host.launchctl, run=unrunnable)
+        self.kit.host = dataclasses.replace(self.kit.host, launchctl=launchctl)
+
+    def test_uninstall_with_an_unrunnable_launchctl_is_one_line(self) -> None:
+        self.kit.install_app()
+        self._unrunnable_launchctl()
+        self.assertIn("launchctl bootout", self.assert_one_error_line("uninstall"))
+        self.assertTrue(self.kit.paths.launch_agent_plist.exists())
+
+    def test_install_with_an_unrunnable_launchctl_is_one_line(self) -> None:
+        # print answers absent, so install gets past its old-agent check and reaches the
+        # run seam's bootout, which the seam must map to its labeled LaunchdError.
+        self.kit.write_identity()
+        self._unrunnable_launchctl(but_print=fx.ABSENT_RC)
+        line = self.assert_one_error_line("install")
+        label = self.kit.layout.launchd_label
+        self.assertIn(f"{label}: could not run launchctl bootout: ", line)
+        self.assertIn("No such file or directory", line)
 
 
 class ParserTest(unittest.TestCase):
@@ -225,6 +325,15 @@ class ParserTest(unittest.TestCase):
         for command in ("version", "build", "install", "uninstall", "status"):
             self.assertIn(command, out)
         self.assertIn("Prerequisites", out)
+
+    def test_every_help_text_matches_its_golden_file(self) -> None:
+        for command, golden in _HELP_GOLDENS.items():
+            argv = [command, "--help"] if command else ["--help"]
+            with self.subTest(command=command or "(top level)"):
+                with mock.patch.dict(os.environ, {"COLUMNS": _HELP_COLUMNS}):
+                    code, out, err = _run(*argv)
+                expected = (_GOLDEN_DIR / golden).read_text(encoding="utf-8")
+                self.assertEqual((code, out, err), (0, expected, ""))
 
     def test_build_requires_its_output_folder(self) -> None:
         code, _, err = _run("build")

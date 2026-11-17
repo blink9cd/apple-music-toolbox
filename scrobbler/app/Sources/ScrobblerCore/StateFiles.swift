@@ -37,6 +37,10 @@ public struct StatusSnapshot: Codable, Equatable, Sendable {
   public var unrecordableCount = 0
   /// Whether macOS refused the app's request to read Music.
   public var automationDenied = false
+  /// When the permission request still in flight began; nil when none is. Optional in the
+  /// format: a reader of a file without the key takes it as no request, so the format
+  /// number did not move when the key was added.
+  public var automationAskedAt: Double?
   /// What is playing now, when anything is.
   public var nowPlaying: NowPlayingRecord?
 
@@ -54,6 +58,7 @@ public struct StatusSnapshot: Codable, Equatable, Sendable {
     case lastSendError = "last_send_error"
     case unrecordableCount = "unrecordable_count"
     case automationDenied = "automation_denied"
+    case automationAskedAt = "automation_asked_at"
     case nowPlaying = "now_playing"
   }
 
@@ -86,6 +91,7 @@ public struct StatusSnapshot: Codable, Equatable, Sendable {
     try container.encode(lastSendError, forKey: .lastSendError)
     try container.encode(unrecordableCount, forKey: .unrecordableCount)
     try container.encode(automationDenied, forKey: .automationDenied)
+    try container.encode(automationAskedAt, forKey: .automationAskedAt)
     try container.encode(nowPlaying, forKey: .nowPlaying)
   }
 }

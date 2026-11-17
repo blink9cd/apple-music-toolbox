@@ -1,0 +1,13 @@
+usage: scrobbler install [-h]
+
+build, sign and install the app and its LaunchAgent
+
+options:
+  -h, --help  show this help message and exit
+
+Prerequisites: the Python release requires-python names in the project's
+pyproject.toml, and macOS 14 or later. build and install need the Swift
+toolchain and codesign; build --sign and install need a signing identity in
+the signing setting file layout.json names, outside every checkout. Run
+install from the repository's main checkout, never a linked worktree; see
+scrobbler.md.

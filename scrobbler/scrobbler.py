@@ -9,12 +9,16 @@ The commands are ``version``, ``build``, ``install``, ``uninstall`` and ``status
 each does is in ``scrobbler.md`` and in the modules under ``src/`` that hold it:
 `scrob_bundle` (build and sign), `scrob_agent` (install and uninstall), `scrob_status`
 (status and the session check), `scrob_host` (the process facts every command reads)
-and `scrob_layout` (the names and paths). A refusal is one ``ERROR:`` line and exit 2; a
-build, sign or launchd step that fails is one ``ERROR:`` line and exit 1.
+and `scrob_layout` (the names and paths); the generic steps the first three call are
+signed_app's, beside this tool's folder. A refusal is one ``ERROR:`` line and exit 2; a
+build, sign or launchd step that fails, or any other ``OSError``, is one ``ERROR:``
+line and exit 1, never a traceback.
 
 Importing this module puts the private modules, under ``src/``, on ``sys.path``, then
 the shared libraries, each at one fixed place directly under the project root, beside
 this tool's folder.
+signed_app, this project's own library of the generic build, sign and install steps, is
+one of them.
 
 Entry point assumptions: run as a script, or imported for `main`.
 """
@@ -35,7 +39,8 @@ sys.path.insert(0, str(SRC_DIR))
 # also put any same-named folder above the checkout on sys.path, and whatever it holds
 # would be imported in place of the real module. See stdio_utf8/stdio_utf8.md, "How this
 # project's tools import it". swift_gate's signing reader lives in that tool's private
-# src/, the rest at the top of their own folders.
+# src/; signed_app's front module, which puts its own src/ on sys.path, and the rest
+# at the top of their own folders.
 sys.path += [
     str(Path(__file__).resolve().parents[1] / folder)
     for folder in (
@@ -44,11 +49,15 @@ sys.path += [
         "bounded_run",
         "launchd_agent",
         "swift_gate/src",
+        "signed_app",
     )
 ]
 
 import help_formatter  # noqa: E402 - import follows the sys.path bootstrap above
 import launchd_agent  # noqa: E402 - import follows the sys.path bootstrap above
+
+# Ahead of the scrob_ modules, which import the steps it puts on sys.path.
+import signed_app  # noqa: E402, F401 - puts signed_app's src/ on sys.path
 import scrob_agent  # noqa: E402 - import follows the sys.path bootstrap above
 import scrob_bundle  # noqa: E402 - import follows the sys.path bootstrap above
 import scrob_host  # noqa: E402 - import follows the sys.path bootstrap above
@@ -71,7 +80,9 @@ _EPILOG: Final = (
     "repository's main checkout, never a linked worktree; see scrobbler.md."
 )
 #: The failures that end a command with exit 1, and the refusals that end it with 2.
-_FAILURES: Final = (scrob_bundle.BuildFailed, launchd_agent.LaunchdError)
+#: OSError is a failure too: any the commands do not turn into one of their own (an
+#: uninstall's plist that cannot be removed, say) is still one ERROR line, not a traceback.
+_FAILURES: Final = (scrob_bundle.BuildFailed, launchd_agent.LaunchdError, OSError)
 _REFUSALS: Final = (scrob_bundle.Refused, scrob_layout.LayoutError)
 #: How a command gets its host: built only when the command needs one.
 HostSource = Callable[[], scrob_host.Host]

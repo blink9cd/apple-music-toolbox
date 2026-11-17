@@ -41,6 +41,7 @@ sys.path[:0] = [str(_HERE.parent), str(_HERE.parent / "src")]
 import library_audit as la  # noqa: E402 - import follows the sys.path bootstrap above
 import audit_rows  # noqa: E402 - import follows the sys.path bootstrap above
 import music_calls  # noqa: E402 - import follows the sys.path bootstrap above
+import music_calls_list  # noqa: E402 - import follows the sys.path bootstrap above
 
 #: The switch that runs this test, and the value that turns it on.
 _SWITCH = "LIBRARY_AUDIT_LIVE"
@@ -120,7 +121,7 @@ class LiveTest(unittest.TestCase):  # pragma: no cover - runs only against Music
             asked = min(_MAX_TRACKS, total)
             if not asked:
                 return total, "", 0
-            reply = music_calls.list_tracks(1, asked, run=music_calls.real_run)
+            reply = music_calls_list.list_tracks(1, asked, run=music_calls.real_run)
         except music_calls.MusicCallError as exc:
             self.fail(f"{type(exc).__name__}, error {error_number_of(exc.reason)}")
         return total, reply, asked

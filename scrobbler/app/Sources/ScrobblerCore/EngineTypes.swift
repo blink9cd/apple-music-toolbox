@@ -64,6 +64,10 @@ public enum EngineInput: Sendable, Equatable {
   /// A snapshot read of `persistentID` that failed.
   case snapshotFailed(persistentID: String, SnapshotReadError, at: Double)
   // swiftlint:disable:previous identifier_name - a case label, not a variable; callers write `at:`
+  /// The system's word on whether the scrobbler may script Music: a permission answer, or
+  /// a position read it refused.
+  case automation(allowed: Bool, at: Double)
+  // swiftlint:disable:previous identifier_name - a case label, not a variable; callers write `at:`
   /// Music quit.
   case musicQuit(at: Double)
   // swiftlint:disable:previous identifier_name - a case label, not a variable; callers write `at:`

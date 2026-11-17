@@ -172,7 +172,8 @@ summary: findings 2; rows in the sync 3, files 3; outside the sync 1, unparsed l
 | `summary` | `findings`, `rows_in_sync`, `files`, `outside_sync`, `unparsed_lines`, `sizes_unknown`, `other_entries`. |
 
 The report names real tracks, so keep it out of any repository: stdout, or a `--report`
-outside one.
+outside one. The options' values, their refusals and the write are
+`../tag_refresh/src/report_file.py`, the same delivery `library_audit` uses.
 
 ### The HTML page
 

@@ -370,6 +370,14 @@ class FormatAndReportTest(af.AuditCase):
         self.assertFalse(parser.parse_args(["--library", "lib"]).decode)
         self.assertIs(parser.parse_args(["--library", "lib", "--decode"]).decode, True)
 
+    def test_the_help_is_laid_out_by_the_shared_none_hiding_formatter(self) -> None:
+        # Pinned as a binding, not a rendering: on an interpreter past argparse's
+        # required-option fix, the stock formatter renders the same help.
+        self.assertIs(
+            la.build_parser().formatter_class,
+            la.help_formatter.RawNoneHidingFormatter,
+        )
+
 
 class RealWiringTest(unittest.TestCase):
     """The real wiring binds the real seams; nothing here calls one."""

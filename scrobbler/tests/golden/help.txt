@@ -1,0 +1,21 @@
+usage: scrobbler [-h] COMMAND ...
+
+listensmith's Music.app adapter: manage the scrobbler app.
+
+positional arguments:
+  COMMAND
+    version    print the scrobbler's version
+    build      build the app bundle, and with --sign sign it
+    install    build, sign and install the app and its LaunchAgent
+    uninstall  unload the LaunchAgent; keep the app, queue, state and config
+    status     report the scrobbler's health
+
+options:
+  -h, --help   show this help message and exit
+
+Prerequisites: the Python release requires-python names in the project's
+pyproject.toml, and macOS 14 or later. build and install need the Swift
+toolchain and codesign; build --sign and install need a signing identity in
+the signing setting file layout.json names, outside every checkout. Run
+install from the repository's main checkout, never a linked worktree; see
+scrobbler.md.

@@ -21,7 +21,10 @@ Three rules live here:
   ellipsis, or a fixed placeholder for a one-word identity (a SHA-1, a team ID), and
   :func:`redact` scrubs every certificate common name and parenthesized team ID from
   ``codesign``'s own output, which echoes every matching certificate when an identity is
-  ambiguous. :func:`render_path` shows a path under the home as ``~/…`` in every message.
+  ambiguous. Both rules live in :mod:`swgate_redact`, re-exported here.
+  :func:`render_path` shows a path under the home as ``~/…`` in every message, matching
+  the home as given and resolved, and every message here takes the caller's home,
+  defaulting to the running user's.
 
 Entry point assumptions
 -----------------------
@@ -32,12 +35,10 @@ Reads one file through an injectable seam, and runs ``git`` only through the inj
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
-
 from swgate_model import (
     Configured,
     NotConfigured,
@@ -45,14 +46,17 @@ from swgate_model import (
     SigningConfigError,
     SigningSetting,
 )
+from swgate_redact import CERTIFICATE_TYPES, redact_text, render_identity
 
 __all__ = [
+    "CERTIFICATE_TYPES",
     "Configured",
     "NotConfigured",
     "SigningConfigError",
     "SigningSetting",
     "checkout_roots",
     "enclosing_checkout",
+    "home_or_default",
     "read_signing_identity",
     "redact",
     "render_identity",
@@ -60,22 +64,9 @@ __all__ = [
 ]
 
 IDENTITY_KEY = "identity"
-_ELLIPSIS = "…"
-_PLACEHOLDER = "<identity>"  # shown for a one-word identity, which has no safe prefix
 _HOME = "~"
 _WORKTREE_PREFIX = "worktree "  # a `git worktree list --porcelain` record's first line
 _NOT_A_REPO = "not a git repository"  # git's stderr when there is no repository at all
-# An Apple team ID: ten upper-case letters or digits, parenthesized after a common name.
-_TEAM_ID = r"[A-Z0-9]{10}"
-_ANY_TEAM_ID = re.compile(rf"\({_TEAM_ID}\)")
-# The configured identity's own team ID: the whole identity, or its trailing "(ID)".
-_OWN_TEAM_ID = re.compile(rf"^({_TEAM_ID})$|\(({_TEAM_ID})\)\s*$")
-# A certificate common name, "<Type>: <Name> (<ID>)", as codesign echoes it. The name is
-# free text (a parenthesized company, a colon, a quote), so it runs lazily to the nearest
-# parenthesized team ID on the line rather than stopping at the first such character.
-_COMMON_NAME = re.compile(
-    rf"(?P<kind>[0-9A-Za-z][0-9A-Za-z ]*): [^\n]+? \({_TEAM_ID}\)"
-)
 _REFUSAL = "the signing identity must live outside every checkout"
 
 ReadTextFn = Callable[[Path], str]
@@ -87,64 +78,66 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def render_identity(identity: str) -> str:
-    """The identity as shown anywhere: its first word, or a placeholder, plus an ellipsis."""
-    words = identity.split()
-    return f"{words[0] if len(words) > 1 else _PLACEHOLDER}{_ELLIPSIS}"
+def _home_spellings(home: Path) -> tuple[Path, ...]:
+    """*home* as given and resolved, longest first, so a symlinked home matches either.
+
+    A path that reaches a message is often resolved while ``Path.home()`` names a link
+    to it. Longest first, because one spelling can contain the other as a substring.
+    """
+    spellings = dict.fromkeys((home, home.resolve()))
+    return tuple(sorted(spellings, key=lambda each: len(str(each)), reverse=True))
 
 
 def render_path(path: Path, home: Path) -> str:
-    """*path* as shown in a message: under *home* as ``~/…``, otherwise as given."""
-    if path == home:
-        return _HOME
-    if path.is_relative_to(home):
-        return f"{_HOME}/{path.relative_to(home).as_posix()}"
+    """*path* as shown in a message: under *home*, as given or resolved, as ``~/…``."""
+    for base in _home_spellings(home):
+        if path == base:
+            return _HOME
+        if path.is_relative_to(base):
+            return f"{_HOME}/{path.relative_to(base).as_posix()}"
     return str(path)
 
 
 def _tilde_text(text: str, home: Path) -> str:
     """*text* with every path under *home* shown from ``~``, as :func:`render_path` does."""
-    return text.replace(f"{home}{os.sep}", f"{_HOME}/")
+    for base in _home_spellings(home):
+        text = text.replace(f"{base}{os.sep}", f"{_HOME}/")
+    return text
 
 
 def redact(text: str, identity: str, *, home: Path | None = None) -> str:
     """*text* with every common name, team ID and the identity scrubbed.
 
-    A common name keeps only its type (``Apple Development: …``) and any parenthesized team
-    ID becomes ``(…)``, whatever the identity, because codesign echoes every certificate an
-    ambiguous identity matched. The identity itself is replaced by its rendering only when
-    that shortens it, so the ad-hoc ``-`` leaves codesign's own flags intact. With *home*,
-    paths under it are shown from ``~``.
+    The rules are :func:`swgate_redact.redact_text`'s. With *home*, paths under it, as
+    given or resolved, are shown from ``~``.
     """
-    scrubbed = _COMMON_NAME.sub(lambda match: f"{match['kind']}: {_ELLIPSIS}", text)
-    scrubbed = _ANY_TEAM_ID.sub(f"({_ELLIPSIS})", scrubbed)
-    shown = render_identity(identity)
-    if len(shown) < len(identity):
-        scrubbed = scrubbed.replace(identity, shown)
-    own = _OWN_TEAM_ID.search(identity)
-    if own is not None:
-        scrubbed = scrubbed.replace(own.group(1) or own.group(2), _ELLIPSIS)
+    scrubbed = redact_text(text, identity)
     return scrubbed if home is None else _tilde_text(scrubbed, home)
 
 
+def home_or_default(home: Path | None) -> Path:
+    """*home*, or the running user's when the caller gave none, read at call time."""
+    return Path.home() if home is None else home
+
+
 def _git(
-    run: RunFn, argv: Sequence[str], cwd: Path, timeout: float
+    run: RunFn, argv: Sequence[str], cwd: Path, timeout: float, home: Path
 ) -> subprocess.CompletedProcess[str]:
     """Run one git query; a git that cannot run or times out is a SigningConfigError.
 
     The exception's own text quotes the argv (``-C <dir>``) or the executable's path, so
-    it is shown with the home as ``~``, so no message carries the home's layout.
+    it is shown with *home* as ``~``, so no message carries the home's layout.
     """
     try:
         return run(argv, cwd=cwd, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SigningConfigError(
             f"could not run git to locate the checkout for {_REFUSAL}: "
-            f"{_tilde_text(str(exc), Path.home())}"
+            f"{_tilde_text(str(exc), home)}"
         ) from exc
 
 
-def _toplevel(cwd: Path, run: RunFn, timeout: float) -> Path | None:
+def _toplevel(cwd: Path, run: RunFn, timeout: float, home: Path) -> Path | None:
     """The top level of the repository holding *cwd*, or None when there is none.
 
     Only git's "not a git repository" is None. Any other failure (dubious ownership, a
@@ -152,34 +145,38 @@ def _toplevel(cwd: Path, run: RunFn, timeout: float) -> Path | None:
     fail open.
     """
     argv = ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"]
-    done = _git(run, argv, cwd, timeout)
+    done = _git(run, argv, cwd, timeout, home)
     if done.returncode == 0:
         return Path(done.stdout.strip())
     if _NOT_A_REPO in done.stderr:
         return None
-    home = Path.home()
     raise SigningConfigError(
         f"git rev-parse failed (rc {done.returncode}) in {render_path(cwd, home)}, so "
         f"{_REFUSAL} cannot be checked: {_tilde_text(done.stderr.strip(), home)}"
     )
 
 
-def checkout_roots(target: Path, run: RunFn, *, timeout: float) -> tuple[Path, ...]:
+def checkout_roots(
+    target: Path, run: RunFn, *, timeout: float, home: Path | None = None
+) -> tuple[Path, ...]:
     """The target's git top level and every worktree of that repository, resolved.
 
     Outside any git repository there is no checkout, so the answer is ``()``. A ``git``
     that cannot run, times out, fails otherwise, or cannot list the worktrees raises
     :class:`SigningConfigError`: the outside-every-checkout check cannot be skipped by a
-    broken tool.
+    broken tool. Its
+    message shows a path under *home* (default: the running user's) from ``~``.
     """
-    top = _toplevel(target, run, timeout)
+    home_dir = home_or_default(home)
+    top = _toplevel(target, run, timeout, home_dir)
     if top is None:
         return ()
-    listed = _git(run, ["git", "worktree", "list", "--porcelain"], target, timeout)
+    worktrees = ["git", "worktree", "list", "--porcelain"]
+    listed = _git(run, worktrees, target, timeout, home_dir)
     if listed.returncode != 0:
         raise SigningConfigError(
             f"git worktree list failed (rc {listed.returncode}), so {_REFUSAL} "
-            f"cannot be checked: {_tilde_text(listed.stderr.strip(), Path.home())}"
+            f"cannot be checked: {_tilde_text(listed.stderr.strip(), home_dir)}"
         )
     roots = [top]
     roots.extend(
@@ -190,17 +187,20 @@ def checkout_roots(target: Path, run: RunFn, *, timeout: float) -> tuple[Path, .
     return tuple(dict.fromkeys(root.resolve() for root in roots))
 
 
-def enclosing_checkout(path: Path, run: RunFn, *, timeout: float) -> tuple[Path, ...]:
+def enclosing_checkout(
+    path: Path, run: RunFn, *, timeout: float, home: Path | None = None
+) -> tuple[Path, ...]:
     """The top level of any repository holding the setting *path*, as ``()`` or one root.
 
     Asked from the path's nearest existing directory, since git needs one to start from,
     and git answers from the real path, case and links canonicalized, for any repository:
-    the target's, a nested one, or an unrelated one such as a dotfiles checkout.
+    the target's, a nested one, or an unrelated one such as a dotfiles checkout. *home*
+    is as :func:`checkout_roots` takes it.
     """
     resolved = path.resolve()
     # The filesystem root always exists, so the search always ends on a directory.
     start = next(each for each in (resolved, *resolved.parents) if each.is_dir())
-    top = _toplevel(start, run, timeout)
+    top = _toplevel(start, run, timeout, home_or_default(home))
     return () if top is None else (top.resolve(),)
 
 
@@ -213,7 +213,7 @@ def _file_id(path: Path) -> FileId | None:
     return status.st_dev, status.st_ino
 
 
-def _refuse_inside(path: Path, roots: Sequence[Path]) -> Path:
+def _refuse_inside(path: Path, roots: Sequence[Path], home: Path) -> Path:
     """*path* resolved, or :class:`SigningConfigError` when it is at or under any root.
 
     A root matches lexically, or by file identity against any existing ancestor, which is
@@ -229,7 +229,6 @@ def _refuse_inside(path: Path, roots: Sequence[Path]) -> Path:
     for root in roots:
         root_id = _file_id(root)
         if resolved.is_relative_to(root.resolve()) or root_id in ancestors:
-            home = Path.home()
             raise SigningConfigError(
                 f"{_REFUSAL}: {render_path(path, home)} is inside "
                 f"{render_path(root, home)}"
@@ -242,16 +241,19 @@ def read_signing_identity(
     *,
     checkout_roots: Sequence[Path],
     read_text: ReadTextFn = _read_text,
+    home: Path | None = None,
 ) -> SigningSetting:
     """The signing setting at *path*: :class:`Configured`, or :class:`NotConfigured`.
 
     Raises :class:`SigningConfigError` for a path inside any of *checkout_roots*, an
     unreadable or non-TOML file, or a missing, empty or non-string ``identity``. The file
     read is the resolved path the check accepted, not the one given. No message quotes
-    the file's content, which is where the team ID is.
+    the file's content, which is where the team ID is, and each shows a path under *home*
+    (default: the running user's) from ``~``.
     """
-    resolved = _refuse_inside(path, checkout_roots)
-    shown = render_path(path, Path.home())
+    home_dir = home_or_default(home)
+    resolved = _refuse_inside(path, checkout_roots, home_dir)
+    shown = render_path(path, home_dir)
     try:
         text = read_text(resolved)
     except FileNotFoundError:

@@ -1,0 +1,5 @@
+{
+  "scripts": [
+    "runner/grant_probe/grant_probe.py"
+  ]
+}
